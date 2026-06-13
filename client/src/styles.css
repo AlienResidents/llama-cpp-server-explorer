@@ -50,6 +50,13 @@ pre code { background: transparent; border: none; padding: 0; }
 }
 .header button:hover { background: var(--bg-hover); }
 
+.header .source-picker {
+  padding: 6px 10px; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px; font-size: 13px;
+  cursor: pointer;
+}
+.header .source-picker:hover { background: var(--bg-hover); }
+
 .body { display: grid; grid-template-columns: 360px 1fr; flex: 1; overflow: hidden; }
 
 .list { border-right: 1px solid var(--border); overflow-y: auto; background: var(--bg-soft); }
@@ -139,9 +146,18 @@ pre code { background: transparent; border: none; padding: 0; }
   border-bottom: 1px solid var(--border);
 }
 .modal header h2 { margin: 0; font-size: 16px; flex: 1; }
-.modal header button {
+.modal header button.close {
   background: transparent; color: var(--fg-muted); border: none; cursor: pointer;
   font-size: 20px; padding: 0 6px;
+}
+.modal header .tabs { display: flex; gap: 4px; margin-left: 16px; flex: 1; }
+.modal header .tabs button {
+  padding: 5px 10px; background: transparent; color: var(--fg-muted);
+  border: 1px solid transparent; border-radius: 5px; cursor: pointer; font-size: 13px;
+}
+.modal header .tabs button:hover { background: var(--bg-hover); color: var(--fg); }
+.modal header .tabs button.active {
+  color: var(--fg); border-color: var(--border); background: var(--bg);
 }
 .modal .body { padding: 20px; display: block; overflow-y: auto; }
 .modal .field { margin-bottom: 16px; }
@@ -165,3 +181,49 @@ pre code { background: transparent; border: none; padding: 0; }
 .modal footer button:hover { background: var(--bg-hover); }
 .modal footer button.primary:hover { background: #79b8ff; }
 .modal footer button.danger { color: var(--danger); border-color: var(--danger); }
+
+/* Sources panel */
+.sources-list { display: flex; flex-direction: column; gap: 10px; }
+.source-row {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 12px 14px; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.source-summary { flex: 1; min-width: 0; }
+.source-name { font-size: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.source-name .badge {
+  font-size: 10px; padding: 1px 6px; border-radius: 8px;
+  background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent);
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.source-meta { font-size: 12px; color: var(--fg-muted); margin-top: 4px; }
+.source-url {
+  font-size: 11px; color: var(--fg-muted); margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+.source-actions { display: flex; flex-direction: column; gap: 6px; }
+.source-actions button {
+  padding: 4px 10px; font-size: 12px; cursor: pointer;
+  background: var(--bg-soft); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 5px;
+}
+.source-actions button:hover { background: var(--bg-hover); }
+.source-actions button.danger { color: var(--danger); border-color: var(--danger); }
+
+.source-form {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px; margin-top: 4px;
+}
+.source-form .field input[type="text"], .source-form .field select {
+  width: 100%; padding: 6px 9px; background: var(--bg-soft); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 5px; font-size: 13px;
+}
+.source-form .field input:disabled { opacity: 0.6; }
+.source-form .field { margin-bottom: 12px; }
+.source-form .field label { font-size: 12px; color: var(--fg-muted); display: block; margin-bottom: 3px; }
+.source-form .field .hint { font-size: 11px; color: var(--fg-muted); margin-top: 3px; }
+.modal .body select {
+  padding: 6px 9px; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 5px; font-size: 13px;
+  width: 100%;
+}

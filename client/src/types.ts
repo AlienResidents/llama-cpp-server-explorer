@@ -6,6 +6,18 @@ export type CacheMeta = {
   was_refreshed: boolean;
 };
 
+export type ParserType = "server-readme-table" | "llama-bench-usage-block";
+
+export type Source = {
+  id: string;
+  name: string;
+  readme_url: string;
+  arg_cpp_url: string | null;
+  github_repo: string;
+  parser: ParserType;
+  is_default: boolean;
+};
+
 export type Option = {
   id: string;
   category: string;
@@ -40,9 +52,7 @@ export type OptionDetail = {
 export type Settings = {
   cache_ttl_hours: number;
   toast_duration_ms: number;
-  readme_url: string;
-  arg_cpp_url: string;
-  github_repo: string;
+  active_source_id: string;
   github_issue_search_limit: number;
   enable_llm_explanation: boolean;
   enable_source_code_lookup: boolean;
@@ -54,8 +64,8 @@ export type Settings = {
 export type Meta = {
   settings: Settings;
   defaults: Settings;
+  sources: Source[];
   bedrock_available: boolean;
-  options_last_fetched: number | null;
 };
 
 export type ApiEnvelope<T> = { data: T; cache: CacheMeta };

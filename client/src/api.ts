@@ -1,32 +1,52 @@
-import type { ApiEnvelope, Meta, Option, OptionDetail, Settings } from "./types";
+import type {
+  ApiEnvelope,
+  Meta,
+  Option,
+  OptionDetail,
+  Settings,
+  Source,
+} from "./types";
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(path);
-  if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
   return (await res.json()) as T;
 }
 
-async function send<T>(path: string, method: "POST" | "PUT", body?: unknown): Promise<T> {
+async function send<T>(
+  path: string,
+  method: "POST" | "PUT" | "DELETE",
+  body?: unknown,
+): Promise<T> {
   const res = await fetch(path, {
     method,
     headers: body ? { "Content-Type": "application/json" } : {},
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
   return (await res.json()) as T;
 }
 
+const enc = encodeURIComponent;
+
 export const api = {
   meta: () => getJson<Meta>("/api/meta"),
-  options: (force = false) =>
-    getJson<ApiEnvelope<Option[]>>(`/api/options${force ? "?force=1" : ""}`),
-  optionDetail: (id: string, force = false) =>
-    getJson<ApiEnvelope<OptionDetail>>(`/api/options/${encodeURIComponent(id)}${force ? "?force=1" : ""}`),
-  refresh: (id: string) =>
-    send<{ ok: boolean }>(`/api/options/${encodeURIComponent(id)}/refresh`, "POST"),
-  explain: (id: string) =>
+  options: (sourceId: string, force = false) =>
+    getJson<ApiEnvelope<Option[]>>(
+      `/api/sources/${enc(sourceId)}/options${force ? "?force=1" : ""}`,
+    ),
+  optionDetail: (sourceId: string, id: string, force = false) =>
+    getJson<ApiEnvelope<OptionDetail>>(
+      `/api/sources/${enc(sourceId)}/options/${enc(id)}${force ? "?force=1" : ""}`,
+    ),
+  refresh: (sourceId: string, id: string) =>
+    send<{ ok: boolean }>(
+      `/api/sources/${enc(sourceId)}/options/${enc(id)}/refresh`,
+      "POST",
+    ),
+  explain: (sourceId: string, id: string) =>
     send<{ explanation: { text: string; model: string; fetched_at: number } }>(
-      `/api/options/${encodeURIComponent(id)}/explain`,
+      `/api/sources/${enc(sourceId)}/options/${enc(id)}/explain`,
       "POST",
     ),
   getSettings: () => getJson<{ settings: Settings; defaults: Settings }>("/api/settings"),
@@ -34,4 +54,11 @@ export const api = {
     send<{ settings: Settings; defaults: Settings }>("/api/settings", "PUT", patch),
   resetSettings: () =>
     send<{ settings: Settings; defaults: Settings }>("/api/settings/reset", "POST"),
+  listSources: () => getJson<{ sources: Source[] }>("/api/sources"),
+  createSource: (s: Omit<Source, "is_default">) =>
+    send<{ source: Source }>("/api/sources", "POST", s),
+  updateSource: (id: string, patch: Partial<Omit<Source, "id" | "is_default">>) =>
+    send<{ source: Source }>(`/api/sources/${enc(id)}`, "PUT", patch),
+  deleteSource: (id: string) =>
+    send<{ ok: boolean }>(`/api/sources/${enc(id)}`, "DELETE"),
 };

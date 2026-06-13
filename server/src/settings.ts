@@ -1,11 +1,13 @@
+// Settings — global app-level knobs. Source-specific fields (readme_url,
+// arg_cpp_url, github_repo) moved to the `sources` table; this file now only
+// holds settings that aren't tied to a particular source.
+
 import { db } from "./db.js";
 
 export type SettingsShape = {
   cache_ttl_hours: number;
   toast_duration_ms: number;
-  readme_url: string;
-  arg_cpp_url: string;
-  github_repo: string;
+  active_source_id: string;
   github_issue_search_limit: number;
   enable_llm_explanation: boolean;
   enable_source_code_lookup: boolean;
@@ -17,9 +19,7 @@ export type SettingsShape = {
 export const DEFAULT_SETTINGS: SettingsShape = {
   cache_ttl_hours: 24,
   toast_duration_ms: 2000,
-  readme_url: "https://raw.githubusercontent.com/ggml-org/llama.cpp/master/tools/server/README.md",
-  arg_cpp_url: "https://raw.githubusercontent.com/ggml-org/llama.cpp/master/common/arg.cpp",
-  github_repo: "ggml-org/llama.cpp",
+  active_source_id: "server",
   github_issue_search_limit: 5,
   enable_llm_explanation: true,
   enable_source_code_lookup: true,
@@ -34,9 +34,7 @@ export const DEFAULT_SETTINGS: SettingsShape = {
 const SETTING_TYPES: Record<keyof SettingsShape, "number" | "string" | "boolean"> = {
   cache_ttl_hours: "number",
   toast_duration_ms: "number",
-  readme_url: "string",
-  arg_cpp_url: "string",
-  github_repo: "string",
+  active_source_id: "string",
   github_issue_search_limit: "number",
   enable_llm_explanation: "boolean",
   enable_source_code_lookup: "boolean",

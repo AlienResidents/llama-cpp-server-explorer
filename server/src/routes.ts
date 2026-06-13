@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "./db.js";
-import { parseReadme, type ParsedOption } from "./parser.js";
+import { parseReadme } from "./parser.js";
 import {
   fetchArgCpp,
   fetchReadme,
@@ -15,6 +15,15 @@ import {
   updateSettings,
   type SettingsShape,
 } from "./settings.js";
+import {
+  createSource,
+  deleteSource,
+  getSource,
+  listSources,
+  updateSource,
+  type ParserType,
+  type Source,
+} from "./sources.js";
 import { explainOption } from "./bedrock.js";
 
 export const api = new Hono();
@@ -38,13 +47,14 @@ function ageMs(fetchedAt: number | null | undefined): number | null {
   return Date.now() - fetchedAt;
 }
 
+function requireSource(sourceId: string): Source | null {
+  return getSource(sourceId);
+}
+
 // ─── Settings routes ────────────────────────────────────────────────────────
 
 api.get("/settings", (c) => {
-  return c.json({
-    settings: getSettings(),
-    defaults: DEFAULT_SETTINGS,
-  });
+  return c.json({ settings: getSettings(), defaults: DEFAULT_SETTINGS });
 });
 
 api.put("/settings", async (c) => {
@@ -54,17 +64,68 @@ api.put("/settings", async (c) => {
 });
 
 api.post("/settings/reset", (c) => {
-  const settings = resetSettings();
-  return c.json({ settings, defaults: DEFAULT_SETTINGS });
+  return c.json({ settings: resetSettings(), defaults: DEFAULT_SETTINGS });
+});
+
+// ─── Sources CRUD ──────────────────────────────────────────────────────────
+
+api.get("/sources", (c) => {
+  return c.json({ sources: listSources() });
+});
+
+api.post("/sources", async (c) => {
+  const body = (await c.req.json()) as {
+    id: string;
+    name: string;
+    readme_url: string;
+    arg_cpp_url: string | null;
+    github_repo: string;
+    parser: ParserType;
+  };
+  if (getSource(body.id)) return c.json({ error: "id already exists" }, 409);
+  const created = createSource(body);
+  return c.json({ source: created }, 201);
+});
+
+api.put("/sources/:id", async (c) => {
+  const id = c.req.param("id");
+  const existing = getSource(id);
+  if (!existing) return c.json({ error: "source not found" }, 404);
+  const patch = (await c.req.json()) as Partial<Omit<Source, "id" | "is_default">>;
+  const updated = updateSource(id, patch);
+  return c.json({ source: updated });
+});
+
+api.delete("/sources/:id", (c) => {
+  const id = c.req.param("id");
+  const existing = getSource(id);
+  if (!existing) return c.json({ error: "source not found" }, 404);
+  if (existing.is_default) return c.json({ error: "cannot delete default source" }, 400);
+  // If the source we're deleting is the active one, fall back to the first
+  // remaining source so we don't leave the app pointing at nothing.
+  const settings = getSettings();
+  if (settings.active_source_id === id) {
+    const remaining = listSources().filter((s) => s.id !== id);
+    if (remaining.length > 0) {
+      updateSettings({ active_source_id: remaining[0]!.id });
+    }
+  }
+  // Cascade-delete cached options + details for that source.
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM option_details WHERE source_id = ?").run(id);
+    db.prepare("DELETE FROM options WHERE source_id = ?").run(id);
+    db.prepare("DELETE FROM cache_meta WHERE source_id = ?").run(id);
+    deleteSource(id);
+  });
+  tx();
+  return c.json({ ok: true });
 });
 
 // ─── Meta route — used by the client on boot ────────────────────────────────
 
 api.get("/meta", (c) => {
   const settings = getSettings();
-  const optsRow = db.prepare("SELECT MAX(fetched_at) as fa FROM options").get() as {
-    fa: number | null;
-  };
+  const sources = listSources();
   const bedrockAvailable =
     !!process.env.AWS_PROFILE ||
     !!process.env.AWS_ACCESS_KEY_ID ||
@@ -73,18 +134,19 @@ api.get("/meta", (c) => {
   return c.json({
     settings,
     defaults: DEFAULT_SETTINGS,
+    sources,
     bedrock_available: bedrockAvailable,
-    options_last_fetched: optsRow.fa,
   });
 });
 
-// ─── Options list ──────────────────────────────────────────────────────────
+// ─── Per-source options ─────────────────────────────────────────────────────
 
 const insertOption = db.prepare(`
-  INSERT INTO options (id, category, flags, arg_type, description, default_value, env_var,
-                       more_info_url, raw_row, fetched_at, sort_order)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  ON CONFLICT(id) DO UPDATE SET
+  INSERT INTO options (source_id, id, category, flags, arg_type, description,
+                       default_value, env_var, more_info_url, raw_row,
+                       fetched_at, sort_order)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(source_id, id) DO UPDATE SET
     category = excluded.category,
     flags = excluded.flags,
     arg_type = excluded.arg_type,
@@ -98,25 +160,32 @@ const insertOption = db.prepare(`
 `);
 
 const upsertCacheMeta = db.prepare(`
-  INSERT INTO cache_meta (key, sha, fetched_at, raw) VALUES (?, ?, ?, ?)
-  ON CONFLICT(key) DO UPDATE SET sha = excluded.sha, fetched_at = excluded.fetched_at, raw = excluded.raw
+  INSERT INTO cache_meta (source_id, key, sha, fetched_at, raw)
+  VALUES (?, ?, ?, ?, ?)
+  ON CONFLICT(source_id, key) DO UPDATE SET
+    sha = excluded.sha, fetched_at = excluded.fetched_at, raw = excluded.raw
 `);
 
 const getCacheMeta = db.prepare(
-  "SELECT sha, fetched_at, raw FROM cache_meta WHERE key = ?",
-) as unknown as { get: (k: string) => { sha: string; fetched_at: number; raw: string } | undefined };
+  "SELECT sha, fetched_at, raw FROM cache_meta WHERE source_id = ? AND key = ?",
+) as unknown as {
+  get: (sourceId: string, k: string) => { sha: string; fetched_at: number; raw: string } | undefined;
+};
 
-async function refreshOptions(): Promise<{ count: number; changed: boolean }> {
-  const fetched = await fetchReadme();
-  const prev = getCacheMeta.get("readme");
+async function refreshOptions(source: Source): Promise<{ count: number; changed: boolean }> {
+  const fetched = await fetchReadme(source);
+  const prev = getCacheMeta.get(source.id, "readme");
   const changed = !prev || prev.sha !== fetched.sha;
-  const parsed = parseReadme(fetched.raw);
+  const parsed = parseReadme(fetched.raw, source.parser);
   const now = Date.now();
 
   const tx = db.transaction(() => {
-    if (changed) db.prepare("DELETE FROM options").run();
+    if (changed) {
+      db.prepare("DELETE FROM options WHERE source_id = ?").run(source.id);
+    }
     for (const opt of parsed) {
       insertOption.run(
+        source.id,
         opt.id,
         opt.category,
         JSON.stringify(opt.flags),
@@ -130,16 +199,18 @@ async function refreshOptions(): Promise<{ count: number; changed: boolean }> {
         opt.sortOrder,
       );
     }
-    upsertCacheMeta.run("readme", fetched.sha, now, fetched.raw);
+    upsertCacheMeta.run(source.id, "readme", fetched.sha, now, fetched.raw);
   });
   tx();
   return { count: parsed.length, changed };
 }
 
-const listOptions = db.prepare(`
-  SELECT id, category, flags, arg_type as argType, description, default_value as defaultValue,
-         env_var as envVar, more_info_url as moreInfoUrl, fetched_at as fetchedAt
-  FROM options ORDER BY sort_order ASC
+const listOptionsStmt = db.prepare(`
+  SELECT id, category, flags, arg_type as argType, description,
+         default_value as defaultValue, env_var as envVar,
+         more_info_url as moreInfoUrl, fetched_at as fetchedAt
+  FROM options WHERE source_id = ?
+  ORDER BY sort_order ASC
 `);
 
 type OptionRow = {
@@ -158,26 +229,27 @@ function rowToOption(row: OptionRow) {
   return { ...row, flags: JSON.parse(row.flags) as string[] };
 }
 
-api.get("/options", async (c) => {
+api.get("/sources/:sourceId/options", async (c) => {
+  const source = requireSource(c.req.param("sourceId"));
+  if (!source) return c.json({ error: "source not found" }, 404);
   const force = c.req.query("force") === "1";
-  const meta = getCacheMeta.get("readme");
+  const meta = getCacheMeta.get(source.id, "readme");
   const status: CacheStatus = !meta ? "cold" : isStale(meta.fetched_at) ? "stale" : "fresh";
   let was_refreshed = false;
 
   if (force || !meta || isStale(meta.fetched_at)) {
     try {
-      await refreshOptions();
+      await refreshOptions(source);
       was_refreshed = true;
     } catch (err) {
       console.warn("[options] refresh failed:", (err as Error).message);
-      // Fall back to cached data if available.
       if (!meta) throw err;
     }
   }
 
-  const rows = listOptions.all() as OptionRow[];
+  const rows = listOptionsStmt.all(source.id) as OptionRow[];
   const data = rows.map(rowToOption);
-  const fetchedAt = (getCacheMeta.get("readme")?.fetched_at) ?? null;
+  const fetchedAt = getCacheMeta.get(source.id, "readme")?.fetched_at ?? null;
   const cache: CacheMeta = {
     age_ms: ageMs(fetchedAt),
     status: was_refreshed && status !== "fresh" ? "updated" : status,
@@ -186,43 +258,45 @@ api.get("/options", async (c) => {
   return c.json({ data, cache });
 });
 
-// ─── Option detail ─────────────────────────────────────────────────────────
+// ─── Per-source option detail ──────────────────────────────────────────────
 
 const getOption = db.prepare(`
-  SELECT id, category, flags, arg_type as argType, description, default_value as defaultValue,
-         env_var as envVar, more_info_url as moreInfoUrl, fetched_at as fetchedAt
-  FROM options WHERE id = ?
+  SELECT id, category, flags, arg_type as argType, description,
+         default_value as defaultValue, env_var as envVar,
+         more_info_url as moreInfoUrl, fetched_at as fetchedAt
+  FROM options WHERE source_id = ? AND id = ?
 `);
 
 const getDetail = db.prepare(`
-  SELECT source_block as sourceBlock, source_url as sourceUrl, source_fetched_at as sourceFetchedAt,
+  SELECT source_block as sourceBlock, source_url as sourceUrl,
+         source_fetched_at as sourceFetchedAt,
          issues_json as issuesJson, issues_fetched_at as issuesFetchedAt,
          explanation, explanation_model as explanationModel,
          explanation_fetched_at as explanationFetchedAt
-  FROM option_details WHERE option_id = ?
+  FROM option_details WHERE source_id = ? AND option_id = ?
 `);
 
 const upsertDetailSource = db.prepare(`
-  INSERT INTO option_details (option_id, source_block, source_url, source_fetched_at)
-  VALUES (?, ?, ?, ?)
-  ON CONFLICT(option_id) DO UPDATE SET
+  INSERT INTO option_details (source_id, option_id, source_block, source_url, source_fetched_at)
+  VALUES (?, ?, ?, ?, ?)
+  ON CONFLICT(source_id, option_id) DO UPDATE SET
     source_block = excluded.source_block,
     source_url = excluded.source_url,
     source_fetched_at = excluded.source_fetched_at
 `);
 
 const upsertDetailIssues = db.prepare(`
-  INSERT INTO option_details (option_id, issues_json, issues_fetched_at)
-  VALUES (?, ?, ?)
-  ON CONFLICT(option_id) DO UPDATE SET
+  INSERT INTO option_details (source_id, option_id, issues_json, issues_fetched_at)
+  VALUES (?, ?, ?, ?)
+  ON CONFLICT(source_id, option_id) DO UPDATE SET
     issues_json = excluded.issues_json,
     issues_fetched_at = excluded.issues_fetched_at
 `);
 
 const upsertDetailExplanation = db.prepare(`
-  INSERT INTO option_details (option_id, explanation, explanation_model, explanation_fetched_at)
-  VALUES (?, ?, ?, ?)
-  ON CONFLICT(option_id) DO UPDATE SET
+  INSERT INTO option_details (source_id, option_id, explanation, explanation_model, explanation_fetched_at)
+  VALUES (?, ?, ?, ?, ?)
+  ON CONFLICT(source_id, option_id) DO UPDATE SET
     explanation = excluded.explanation,
     explanation_model = excluded.explanation_model,
     explanation_fetched_at = excluded.explanation_fetched_at
@@ -239,29 +313,33 @@ type DetailRow = {
   explanationFetchedAt: number | null;
 };
 
-async function refreshSourceFor(opt: { id: string; flags: string[] }): Promise<void> {
+async function refreshSourceFor(source: Source, opt: { id: string; flags: string[] }): Promise<void> {
   const settings = getSettings();
   if (!settings.enable_source_code_lookup) return;
-  const src = await fetchArgCpp();
+  if (!source.arg_cpp_url) return; // Source declares no C++ definition file.
+  const src = await fetchArgCpp(source);
+  if (!src) return;
   const found = findArgBlock(src.raw, opt.flags, src.url);
-  upsertDetailSource.run(opt.id, found.block, found.url, Date.now());
+  upsertDetailSource.run(source.id, opt.id, found.block, found.url, Date.now());
 }
 
-async function refreshIssuesFor(opt: { id: string; flags: string[] }): Promise<void> {
+async function refreshIssuesFor(source: Source, opt: { id: string; flags: string[] }): Promise<void> {
   const settings = getSettings();
   if (!settings.enable_issue_lookup) return;
-  const issues = await searchIssues(opt.flags);
-  upsertDetailIssues.run(opt.id, JSON.stringify(issues), Date.now());
+  const issues = await searchIssues(source, opt.flags);
+  upsertDetailIssues.run(source.id, opt.id, JSON.stringify(issues), Date.now());
 }
 
-api.get("/options/:id", async (c) => {
+api.get("/sources/:sourceId/options/:id", async (c) => {
+  const source = requireSource(c.req.param("sourceId"));
+  if (!source) return c.json({ error: "source not found" }, 404);
   const id = c.req.param("id");
   const force = c.req.query("force") === "1";
-  const optRow = getOption.get(id) as OptionRow | undefined;
+  const optRow = getOption.get(source.id, id) as OptionRow | undefined;
   if (!optRow) return c.json({ error: "option not found" }, 404);
   const opt = rowToOption(optRow);
 
-  let detail = (getDetail.get(id) as DetailRow | undefined) ?? null;
+  let detail = (getDetail.get(source.id, id) as DetailRow | undefined) ?? null;
   let was_refreshed = false;
   const initialStatus: CacheStatus = !detail
     ? "cold"
@@ -271,18 +349,20 @@ api.get("/options/:id", async (c) => {
 
   const tasks: Promise<unknown>[] = [];
   if (force || !detail || isStale(detail.sourceFetchedAt)) {
-    tasks.push(refreshSourceFor(opt).catch((e) => console.warn("[detail] source:", e.message)));
+    tasks.push(refreshSourceFor(source, opt).catch((e) => console.warn("[detail] source:", e.message)));
   }
   if (force || !detail || isStale(detail.issuesFetchedAt)) {
-    tasks.push(refreshIssuesFor(opt).catch((e) => console.warn("[detail] issues:", e.message)));
+    tasks.push(refreshIssuesFor(source, opt).catch((e) => console.warn("[detail] issues:", e.message)));
   }
   if (tasks.length > 0) {
     await Promise.all(tasks);
     was_refreshed = true;
-    detail = (getDetail.get(id) as DetailRow | undefined) ?? null;
+    detail = (getDetail.get(source.id, id) as DetailRow | undefined) ?? null;
   }
 
-  const issues: IssueRef[] = detail?.issuesJson ? (JSON.parse(detail.issuesJson) as IssueRef[]) : [];
+  const issues: IssueRef[] = detail?.issuesJson
+    ? (JSON.parse(detail.issuesJson) as IssueRef[])
+    : [];
 
   const oldestFetch = Math.min(
     detail?.sourceFetchedAt ?? Date.now(),
@@ -312,32 +392,34 @@ api.get("/options/:id", async (c) => {
     cache: {
       age_ms: ageMs(oldestFetch),
       status:
-        was_refreshed && initialStatus !== "fresh"
-          ? ("updated" as CacheStatus)
-          : initialStatus,
+        was_refreshed && initialStatus !== "fresh" ? ("updated" as CacheStatus) : initialStatus,
       was_refreshed,
     } satisfies CacheMeta,
   });
 });
 
-api.post("/options/:id/refresh", async (c) => {
+api.post("/sources/:sourceId/options/:id/refresh", async (c) => {
+  const source = requireSource(c.req.param("sourceId"));
+  if (!source) return c.json({ error: "source not found" }, 404);
   const id = c.req.param("id");
-  const optRow = getOption.get(id) as OptionRow | undefined;
+  const optRow = getOption.get(source.id, id) as OptionRow | undefined;
   if (!optRow) return c.json({ error: "option not found" }, 404);
   const opt = rowToOption(optRow);
   await Promise.all([
-    refreshSourceFor(opt).catch((e) => console.warn("[refresh] source:", e.message)),
-    refreshIssuesFor(opt).catch((e) => console.warn("[refresh] issues:", e.message)),
+    refreshSourceFor(source, opt).catch((e) => console.warn("[refresh] source:", e.message)),
+    refreshIssuesFor(source, opt).catch((e) => console.warn("[refresh] issues:", e.message)),
   ]);
   return c.json({ ok: true });
 });
 
-api.post("/options/:id/explain", async (c) => {
+api.post("/sources/:sourceId/options/:id/explain", async (c) => {
+  const source = requireSource(c.req.param("sourceId"));
+  if (!source) return c.json({ error: "source not found" }, 404);
   const id = c.req.param("id");
-  const optRow = getOption.get(id) as OptionRow | undefined;
+  const optRow = getOption.get(source.id, id) as OptionRow | undefined;
   if (!optRow) return c.json({ error: "option not found" }, 404);
   const opt = rowToOption(optRow);
-  const detail = getDetail.get(id) as DetailRow | undefined;
+  const detail = getDetail.get(source.id, id) as DetailRow | undefined;
 
   const result = await explainOption({
     flags: opt.flags,
@@ -349,12 +431,12 @@ api.post("/options/:id/explain", async (c) => {
 
   if (!result) {
     return c.json(
-      { error: "explanation unavailable (LLM disabled or AWS creds missing)" },
+      { error: "explanation unavailable (LLM disabled, AWS creds missing, or model id empty)" },
       503,
     );
   }
 
-  upsertDetailExplanation.run(id, result.text, result.model, Date.now());
+  upsertDetailExplanation.run(source.id, id, result.text, result.model, Date.now());
   return c.json({
     explanation: { text: result.text, model: result.model, fetched_at: Date.now() },
   });

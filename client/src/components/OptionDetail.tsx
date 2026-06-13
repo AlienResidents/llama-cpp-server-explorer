@@ -5,11 +5,13 @@ import { formatAge } from "./Toast";
 
 export function OptionDetailView({
   detail,
+  sourceId,
   bedrockAvailable,
   onRefresh,
   onExplained,
 }: {
   detail: OptionDetail;
+  sourceId: string;
   bedrockAvailable: boolean;
   onRefresh: () => void;
   onExplained: (newDetail: OptionDetail) => void;
@@ -22,7 +24,7 @@ export function OptionDetailView({
     setExplaining(true);
     setExplainErr(null);
     try {
-      const res = await api.explain(option.id);
+      const res = await api.explain(sourceId, option.id);
       onExplained({
         ...detail,
         explanation: {
