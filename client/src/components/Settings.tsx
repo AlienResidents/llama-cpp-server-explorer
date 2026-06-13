@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { ParserType, Settings, Source } from "../types";
 
@@ -71,6 +71,20 @@ export function SettingsModal({
   const [err, setErr] = useState<string | null>(null);
   const [tab, setTab] = useState<"general" | "sources">("general");
 
+  // Track the snapshot we loaded with so Save sends only fields the user
+  // actually changed in this modal session. Without this, opening Settings
+  // and clicking Save clobbers any concurrent changes from elsewhere.
+  const initialSnapshot = useMemo(() => initialSettings, [initialSettings]);
+  const changedKeys = useMemo(
+    () =>
+      (Object.keys(draft) as (keyof Settings)[]).filter(
+        (k) => draft[k] !== initialSnapshot[k],
+      ),
+    [draft, initialSnapshot],
+  );
+  const hasChanges = changedKeys.length > 0;
+  const bedrockIdValidation = validateBedrockModelId(draft.bedrock_model_id);
+
   useEffect(() => {
     function handleKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
     window.addEventListener("keydown", handleKey);
@@ -78,13 +92,31 @@ export function SettingsModal({
   }, [onClose]);
 
   function update<K extends keyof Settings>(key: K, value: Settings[K]) {
+    // Auto-strip the 'amazon-bedrock/' prefix that pi's active-model identifier
+    // injects — a common copy-paste accident from session context.
+    if (key === "bedrock_model_id" && typeof value === "string") {
+      const stripped = value.replace(/^amazon-bedrock\//, "");
+      setDraft((d) => ({ ...d, [key]: stripped as Settings[K] }));
+      return;
+    }
     setDraft((d) => ({ ...d, [key]: value }));
   }
 
   async function saveSettings() {
-    setSaving(true); setErr(null);
+    if (!hasChanges) {
+      onClose();
+      return;
+    }
+    setSaving(true);
+    setErr(null);
     try {
-      const res = await api.updateSettings(draft);
+      // Send only the fields the user actually edited in this session.
+      const patch: Partial<Settings> = {};
+      for (const k of changedKeys) {
+        // @ts-expect-error — narrowed by changedKeys
+        patch[k] = draft[k];
+      }
+      const res = await api.updateSettings(patch);
       onSaved(res.settings, sources);
       onClose();
     } catch (e) {
@@ -135,9 +167,14 @@ export function SettingsModal({
                 <div key={sec.title} style={{ marginBottom: 24 }}>
                   <h3 style={{ fontSize: 13, color: "var(--accent)", textTransform: "uppercase",
                                letterSpacing: 0.5, marginBottom: 12 }}>{sec.title}</h3>
-                  {sec.keys.map((k) => renderField(k, draft, defaults, update))}
+                  {sec.keys.map((k) => renderField(k, draft, defaults, update, k === "bedrock_model_id" ? bedrockIdValidation : null))}
                 </div>
               ))}
+              {hasChanges && (
+                <div style={{ fontSize: 12, color: "var(--fg-muted)", marginTop: -8 }}>
+                  Will save: <code>{changedKeys.join(", ")}</code>
+                </div>
+              )}
             </>
           )}
           {tab === "sources" && (
@@ -157,8 +194,8 @@ export function SettingsModal({
               <button className="danger" onClick={reset} disabled={saving}>Reset to defaults</button>
               <div style={{ flex: 1 }} />
               <button onClick={onClose} disabled={saving}>Cancel</button>
-              <button className="primary" onClick={saveSettings} disabled={saving}>
-                {saving ? "Saving…" : "Save"}
+              <button className="primary" onClick={saveSettings} disabled={saving || !hasChanges}>
+                {saving ? "Saving…" : hasChanges ? `Save (${changedKeys.length})` : "No changes"}
               </button>
             </>
           )}
@@ -179,6 +216,7 @@ function renderField<K extends keyof Settings>(
   draft: Settings,
   defaults: Settings,
   update: <KK extends keyof Settings>(k: KK, v: Settings[KK]) => void,
+  validation: { ok: boolean; message: string } | null = null,
 ) {
   const meta = SETTING_FIELDS[key];
   const value = draft[key];
@@ -236,10 +274,45 @@ function renderField<K extends keyof Settings>(
         type="text"
         value={value as string}
         onChange={(e) => update(key, e.target.value as Settings[K])}
+        style={validation && !validation.ok ? { borderColor: "var(--warn)" } : undefined}
       />
       <div className="hint">{meta.hint} <em>Default: {String(defaults[key])}</em></div>
+      {validation && !validation.ok && (
+        <div style={{ fontSize: 11, color: "var(--warn)", marginTop: 4 }}>⚠ {validation.message}</div>
+      )}
     </div>
   );
+}
+
+// Soft validation for bedrock_model_id. Empty is allowed (disables the LLM
+// path). ARNs and provider.model-id forms are accepted. Anything else gets a
+// non-blocking warning so the user notices likely mistakes (e.g. the
+// 'amazon-bedrock/' prefix from pi's active-model identifier) before saving.
+function validateBedrockModelId(value: string): { ok: boolean; message: string } {
+  if (!value) return { ok: true, message: "" };
+  if (value.startsWith("amazon-bedrock/")) {
+    return {
+      ok: false,
+      message: "Strip the leading 'amazon-bedrock/' — Bedrock wants just the ARN or model id.",
+    };
+  }
+  if (value.startsWith("arn:")) {
+    if (!/^arn:aws[a-z\-]*:bedrock:[a-z0-9\-]+:\d{12}:(inference-profile|foundation-model|provisioned-model|imported-model)\/[A-Za-z0-9._\-]+$/.test(value)) {
+      return {
+        ok: false,
+        message: "Doesn't look like a valid Bedrock ARN. Expected: arn:aws:bedrock:<region>:<account>:inference-profile/<id>",
+      };
+    }
+    return { ok: true, message: "" };
+  }
+  // Bare model id form: provider.model-id (e.g. anthropic.claude-3-5-sonnet-20241022-v2:0)
+  if (/^[a-z0-9]+(\.[a-z0-9._\-:]+)+$/.test(value)) {
+    return { ok: true, message: "" };
+  }
+  return {
+    ok: false,
+    message: "Doesn't look like an ARN (arn:aws:...) or a model id (anthropic.claude-...). Bedrock will probably reject it.",
+  };
 }
 
 function SourcesPanel({

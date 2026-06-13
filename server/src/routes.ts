@@ -429,15 +429,37 @@ api.post("/sources/:sourceId/options/:id/explain", async (c) => {
     sourceBlock: detail?.sourceBlock ?? null,
   });
 
-  if (!result) {
-    return c.json(
-      { error: "explanation unavailable (LLM disabled, AWS creds missing, or model id empty)" },
-      503,
-    );
+  if (!result.ok) {
+    // Map each failure reason to an appropriate HTTP status. Distinguish
+    // 'config not set' (503 — server can't even try) from 'upstream said
+    // no' (502 — Bedrock rejected what we sent) from 'upstream busy' (429).
+    const STATUS_BY_REASON: Record<typeof result.reason, 400 | 401 | 403 | 404 | 429 | 502 | 503> = {
+      llm_disabled: 503,
+      model_id_empty: 503,
+      aws_credentials_missing: 503,
+      aws_validation_error: 400,
+      aws_access_denied: 403,
+      aws_resource_not_found: 404,
+      aws_throttling: 429,
+      aws_call_failed: 502,
+      empty_response: 502,
+    };
+    const status = STATUS_BY_REASON[result.reason];
+    return c.json({ error: result.message, reason: result.reason }, status);
   }
 
-  upsertDetailExplanation.run(source.id, id, result.text, result.model, Date.now());
+  upsertDetailExplanation.run(
+    source.id,
+    id,
+    result.explanation.text,
+    result.explanation.model,
+    Date.now(),
+  );
   return c.json({
-    explanation: { text: result.text, model: result.model, fetched_at: Date.now() },
+    explanation: {
+      text: result.explanation.text,
+      model: result.explanation.model,
+      fetched_at: Date.now(),
+    },
   });
 });

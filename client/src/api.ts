@@ -9,7 +9,7 @@ import type {
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(path);
-  if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
+  if (!res.ok) throw await asApiError(res, path);
   return (await res.json()) as T;
 }
 
@@ -23,8 +23,34 @@ async function send<T>(
     headers: body ? { "Content-Type": "application/json" } : {},
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
+  if (!res.ok) throw await asApiError(res, path);
   return (await res.json()) as T;
+}
+
+export class ApiError extends Error {
+  status: number;
+  reason: string | null;
+  constructor(message: string, status: number, reason: string | null) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.reason = reason;
+  }
+}
+
+async function asApiError(res: Response, path: string): Promise<ApiError> {
+  // Try to lift the server's structured `{error, reason}` into the message; if
+  // the body isn't JSON, fall back to status + path.
+  let message = `${path} → HTTP ${res.status}`;
+  let reason: string | null = null;
+  try {
+    const body = (await res.json()) as { error?: string; reason?: string };
+    if (body.error) message = body.error;
+    if (body.reason) reason = body.reason;
+  } catch {
+    // non-JSON body; keep the default message
+  }
+  return new ApiError(message, res.status, reason);
 }
 
 const enc = encodeURIComponent;
