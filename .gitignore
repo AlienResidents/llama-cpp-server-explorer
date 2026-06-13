@@ -1,10 +1,61 @@
-node_modules
-data/*.db
-data/*.db-journal
-data/*.db-wal
-data/*.db-shm
-dist
+# Logs
+logs/
 *.log
-.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Dependencies
+node_modules/
+
+# Build output (matches at any depth, so server/dist/ is covered too)
+dist/
+
+# Runtime data — SQLite cache, created by the app at runtime
+data/*.db*
+
+# Local-only config (Vite convention) + env files
+*.local
 .env
 .env.local
+
+# OS — macOS
+.DS_Store
+._*
+
+# OS — Windows
+Thumbs.db
+Thumbs.db:encryptable
+Desktop.ini
+ehthumbs.db
+$RECYCLE.BIN/
+
+# OS — Linux
+.directory
+.Trash-*
+
+# Editor — vim / emacs / nano
+*.sw?
+*~
+*.bak
+
+# Editor — IDEs (allow-list shared extension recommendations)
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.fleet/
+
+# Vite — config-change timestamp emits + cache
+vite.config.ts.timestamp-*.mjs
+vite.config.js.timestamp-*.mjs
+.vite/
+
+# Tool caches
+.eslintcache
+.cache/
+.turbo/
+
+# Test coverage (when added)
+coverage/
+.nyc_output/
