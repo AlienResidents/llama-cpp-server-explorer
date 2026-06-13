@@ -56,5 +56,22 @@ export function OptionList({
 }
 
 function stripHtml(s: string): string {
-  return s.replace(/<br\s*\/?>/gi, " · ").replace(/<[^>]+>/g, "");
+  // Convert <br/> separators to a visual divider, then let the browser parse
+  // the rest as HTML and read it back as plain text. Using DOMParser avoids
+  // the multi-character-sanitization pitfall of `replace(/<[^>]+>/g, '')` —
+  // see CodeQL js/incomplete-multi-character-sanitization (alert #1).
+  const withSeparators = s.replace(/<br\s*\/?>/gi, " \u00B7 ");
+  if (typeof DOMParser === "undefined") {
+    // SSR / non-browser fallback: iterate the regex strip until stable so
+    // residue from overlapping matches can't survive.
+    let prev = "";
+    let next = withSeparators;
+    while (prev !== next) {
+      prev = next;
+      next = next.replace(/<[^>]+>/g, "");
+    }
+    return next;
+  }
+  const doc = new DOMParser().parseFromString(withSeparators, "text/html");
+  return doc.body.textContent ?? "";
 }
