@@ -1,9 +1,10 @@
 # llama.cpp server option explorer
 
-Local web UI that lets you dig into every CLI option of the llama.cpp HTTP server,
-with the README description, the matching C++ definition from `common/arg.cpp`,
-related GitHub issues/PRs, and an optional plain-English explanation generated via
-AWS Bedrock (Claude Opus).
+Local web UI that lets you dig into the CLI options of llama.cpp's tools —
+the HTTP server and llama-bench out of the box, with support for adding
+custom sources. Each option pulls the README description, the matching C++
+definition (when available), related GitHub issues/PRs, and an optional
+plain-English explanation generated via AWS Bedrock (Claude Opus).
 
 ## Screenshots
 
@@ -61,43 +62,156 @@ explanation**. Result is cached so subsequent loads serve instantly:
 - Per-option detail caches source-block, related-issues, and explanation
   separately, each with the same TTL.
 
-## Run it
+## Install
+
+These scripts download a tarball of `main` (no git history) and build it
+in place. Re-run to update; your cache survives.
+
+### macOS
 
 ```bash
-cd llama-cpp-server-explorer
+curl -fsSL https://raw.githubusercontent.com/AlienResidents/llama-cpp-server-explorer/main/scripts/install.bash | bash
+```
+
+Default location: `~/Developer/llama-cpp-server-explorer/`. To install
+elsewhere, pass an absolute path:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AlienResidents/llama-cpp-server-explorer/main/scripts/install.bash | bash -s -- ~/code/llama-explorer
+```
+
+### Linux
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AlienResidents/llama-cpp-server-explorer/main/scripts/install.bash | bash
+```
+
+Default location: `${XDG_DATA_HOME:-$HOME/.local/share}/llama-cpp-server-explorer/`.
+Same argument-override convention as macOS.
+
+### Windows
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/AlienResidents/llama-cpp-server-explorer/main/scripts/install.ps1 | iex
+```
+
+Default location: `%LOCALAPPDATA%\llama-cpp-server-explorer\`. To install
+elsewhere, download the script first and pass `-InstallDir`:
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/AlienResidents/llama-cpp-server-explorer/main/scripts/install.ps1 -OutFile install.ps1
+./install.ps1 -InstallDir "C:\opt\llama-explorer"
+```
+
+### WSL2
+
+Use the **Linux** command. The install lands in your Linux filesystem,
+which is much faster for `pnpm install` and `pnpm build` than the
+`/mnt/c/...` Windows filesystem.
+
+### Audit-first install
+
+If you'd rather review the script before running:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AlienResidents/llama-cpp-server-explorer/main/scripts/install.bash -o install.bash
+less install.bash
+bash install.bash           # default location
+bash install.bash ~/foo     # custom location
+```
+
+### Run
+
+```bash
+cd <INSTALL_DIR>
+pnpm start
+# server listening on http://localhost:8787
+```
+
+Then open http://localhost:8787 in your browser. The Hono server serves
+both the API and the built client from a single port.
+
+### Pre-flight requirements
+
+The install script checks for these on PATH:
+
+- `node` (22.12+ or 26+) — install via [nvm](https://github.com/nvm-sh/nvm),
+  [fnm](https://github.com/Schniz/fnm), Homebrew, or [nodejs.org](https://nodejs.org/).
+- `pnpm` — install via `corepack enable && corepack prepare pnpm@latest --activate`,
+  or `npm i -g pnpm`.
+- `tar` — standard on macOS/Linux. Windows 10 1803+ ships with native `tar`.
+- `curl` — standard everywhere; install via package manager if missing.
+
+## Run from source (development)
+
+If you cloned the repo to develop on it:
+
+```bash
 pnpm install
 pnpm dev
 ```
 
-- Frontend: http://localhost:5173
-- Backend:  http://localhost:8787 (proxied through Vite at `/api`)
+- Frontend (Vite): http://localhost:5173 — hot-reload, proxies `/api` to the backend
+- Backend (Hono):  http://localhost:8787 — also serves the built client at `/`
+  when `dist/client/` exists (after `pnpm build`)
 - SQLite DB: `data/explorer.db` (gitignored)
+
+## Sources
+
+The app ships with two preset sources:
+
+| ID            | Parser                       | README                                         | C++ definitions      |
+| ------------- | ---------------------------- | ---------------------------------------------- | -------------------- |
+| `server`      | `server-readme-table`        | `tools/server/README.md`                       | `common/arg.cpp`     |
+| `llama-bench` | `llama-bench-usage-block`    | `tools/llama-bench/README.md`                  | (none — see note)    |
+
+llama-bench parses argv inline in `tools/llama-bench/llama-bench.cpp` rather
+than via the `add_opt(common_arg(...))` pattern that `arg.cpp` uses, so we
+skip the C++-definition lookup for that source. The README description,
+related GitHub issues/PRs, and the LLM explanation still work normally.
+
+**Switch source** via the dropdown in the header. Each source has its own
+cache namespace — switching is instant; no refetch unless that source's
+cache is stale.
+
+**Add a custom source** in Settings → Sources. Provide an ID, a name, the
+raw README URL, an optional `arg.cpp`-style URL, the `owner/repo` for
+GitHub issue search, and pick a parser. Custom sources can be deleted;
+default sources can be edited but not deleted.
 
 ## Settings
 
-Click **⚙ Settings** in the header. Adjust:
+Click **⚙ Settings** in the header. The General tab adjusts:
 
 - Cache TTL (hours)
 - Toast duration (ms)
-- README URL, `arg.cpp` URL, GitHub repo
 - Issue search limit
 - Toggles for source-code lookup, issue lookup, LLM explanation
 - Bedrock model id + region
 
-Settings persist server-side in SQLite. Reset returns all keys to defaults.
+The Sources tab manages the source list above. All settings persist
+server-side in SQLite. Reset returns all keys to defaults; sources are not
+affected by Reset (delete them individually if needed).
 
 ## API
 
-| Method | Path                              | Purpose                                  |
-| ------ | --------------------------------- | ---------------------------------------- |
-| GET    | `/api/meta`                       | Boot info: settings, bedrock-available   |
-| GET    | `/api/settings`                   | Current settings + defaults              |
-| PUT    | `/api/settings`                   | Patch settings                           |
-| POST   | `/api/settings/reset`             | Reset to defaults                        |
-| GET    | `/api/options[?force=1]`          | List of options (auto-refresh if stale)  |
-| GET    | `/api/options/:id[?force=1]`      | Option detail (source, issues, explain)  |
-| POST   | `/api/options/:id/refresh`        | Force-refresh source + issues            |
-| POST   | `/api/options/:id/explain`        | Generate LLM explanation (Bedrock)       |
+All source-scoped routes live under `/api/sources/:sourceId/...`. The cache
+status is returned in every payload as `{ data, cache: { age_ms, status, was_refreshed } }`.
+
+| Method | Path                                                | Purpose                                  |
+| ------ | --------------------------------------------------- | ---------------------------------------- |
+| GET    | `/api/meta`                                         | Boot info: settings, sources, bedrock    |
+| GET    | `/api/settings`                                     | Current settings + defaults              |
+| PUT    | `/api/settings`                                     | Patch settings                           |
+| POST   | `/api/settings/reset`                               | Reset to defaults                        |
+| GET    | `/api/sources`                                      | List sources                             |
+| POST   | `/api/sources`                                      | Create custom source                     |
+| PUT    | `/api/sources/:id`                                  | Update source                            |
+| DELETE | `/api/sources/:id`                                  | Delete source (non-default only)         |
+| GET    | `/api/sources/:id/options[?force=1]`                | Options for a source                     |
+| GET    | `/api/sources/:id/options/:opt[?force=1]`           | Option detail                            |
+| POST   | `/api/sources/:id/options/:opt/refresh`             | Force-refresh source + issues            |
+| POST   | `/api/sources/:id/options/:opt/explain`             | Generate LLM explanation                 |
 
 All `GET` payloads are wrapped as `{ data, cache: { age_ms, status, was_refreshed } }`.
 
