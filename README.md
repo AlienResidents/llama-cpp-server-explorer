@@ -5,6 +5,41 @@ with the README description, the matching C++ definition from `common/arg.cpp`,
 related GitHub issues/PRs, and an optional plain-English explanation generated via
 AWS Bedrock (Claude Opus).
 
+## Screenshots
+
+### Option detail with generated explanation
+
+Clicking an option opens its detail panel: README description, defaults, env
+var, the matching C++ definition (with a link back to the exact line range
+on GitHub), and — if you've generated one — a plain-English breakdown of
+what the flag does, when you'd change it, and the gotchas. The list on the
+left stays available for navigation; selection is highlighted.
+
+![Option detail showing --swa-full with a generated plain-English explanation](images/option-detail-swa-full.png)
+
+![Option detail showing -ub / --ubatch-size with a generated plain-English explanation](images/option-detail-ubatch-size.png)
+
+### Generating an explanation — before / after
+
+Explanations are generated on demand, not at index time. The README + C++
+definition + any related issues are bundled into a single Bedrock call, the
+result is cached server-side keyed by option id, and the button flips from
+*Generate* to *Regenerate* once cached. The C++ definition and related
+issues/PRs are visible without an explanation — the LLM blurb is purely
+additive context for terse flags.
+
+**Before** — detail panel for `-tb, --threads-batch` showing the C++
+definition and 5 related issues/PRs, with the **Generate plain-English
+explanation** button waiting to be clicked:
+
+![-tb, --threads-batch detail panel before generating an explanation](images/explanation-before.png)
+
+**After** — same option, post-generation. Plain-English explanation appears
+inline with timestamp and model id; the button now reads **Regenerate
+explanation**. Result is cached so subsequent loads serve instantly:
+
+![-tb, --threads-batch detail panel after generating an explanation](images/explanation-after.png)
+
 ## Stack
 
 - **Frontend:** Vite + React 19 + TypeScript
