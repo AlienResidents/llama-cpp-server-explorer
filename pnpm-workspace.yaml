@@ -1,0 +1,6 @@
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+minimumReleaseAgeExclude:
+  - '@aws-sdk/client-bedrock-runtime@3.1068.0'
+  - '@aws-sdk/token-providers@3.1068.0'
