@@ -1,3 +1,7 @@
+# Enforce package.json engines on `pnpm install` — errors out if the user's
+# Node/pnpm doesn't match the engines field. (.npmrc engine-strict=true only
+# enforces *dependencies*' engine constraints, not the project's own.)
+engineStrict: true
 allowBuilds:
   better-sqlite3: true
   esbuild: true
