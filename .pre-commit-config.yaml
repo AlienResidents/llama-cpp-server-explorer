@@ -14,3 +14,14 @@ repos:
     -   id: end-of-file-fixer
     -   id: mixed-line-ending
         args: [--fix=lf]
+-   repo: local
+    hooks:
+    -   id: forbid-aws-arn-account-ids
+        name: Forbid AWS account IDs inside ARNs
+        description: |
+          Matches `arn:aws...:<region>:<12-digits>:...` literals. Replace the
+          account ID with a placeholder (e.g. `<ACCOUNT_ID>`) before committing.
+        language: pygrep
+        entry: 'arn:aws[a-z\-]*:[a-z0-9\-]*:[a-z0-9\-]*:[0-9]{12}:'
+        types: [text]
+        exclude: '^\.secrets\.baseline$|^\.pre-commit-config\.yaml$'
