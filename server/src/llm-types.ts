@@ -128,6 +128,13 @@ export interface LlmProvider {
   // if fully ready.
   missingHint(llm: Llm): string;
 
-  // Make the call. Should never throw — return ExplainErr for all failures.
-  explain(llm: Llm, input: ExplainInput): Promise<ExplainResult>;
+  // Make the explanation call. Should never throw — return ExplainErr for all
+  // failures. timeoutMs caps the request via AbortController; on expiry the
+  // provider returns a provider_timeout reason.
+  explain(llm: Llm, input: ExplainInput, timeoutMs: number): Promise<ExplainResult>;
+
+  // Minimal connectivity probe. Sends a tiny prompt with low max_tokens to
+  // verify server reachable + auth works + model exists + can generate. Same
+  // failure-reason vocabulary as explain(). Should never throw.
+  testConnection(llm: Llm, timeoutMs: number): Promise<ExplainResult>;
 }

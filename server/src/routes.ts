@@ -32,6 +32,7 @@ import {
   getActiveLlm,
   getLlm,
   listLlms,
+  testLlm,
   updateLlm,
   type Llm,
   type LlmProviderType,
@@ -167,6 +168,19 @@ api.delete("/llms/:id", (c) => {
   if (existing.is_default) return c.json({ error: "cannot delete default llm" }, 400);
   deleteLlm(id);
   return c.json({ ok: true });
+});
+
+// Test connection — sends a minimal prompt to verify the LLM is reachable,
+// authed, and can generate. Returns 200 always: the HTTP status reflects
+// whether the test endpoint itself ran, not whether the LLM passed. The
+// body carries { ok, ... } so the client can display the result uniformly.
+// 404 only if the LLM id doesn't exist.
+api.post("/llms/:id/test", async (c) => {
+  const id = c.req.param("id");
+  const existing = getLlm(id);
+  if (!existing) return c.json({ error: "llm not found" }, 404);
+  const result = await testLlm(existing);
+  return c.json(result, 200);
 });
 
 // ─── Meta route — used by the client on boot ────────────────────────────────

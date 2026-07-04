@@ -2,6 +2,10 @@
 // (POST {base_url}/chat/completions). Covers together.ai, OpenAI, Groq,
 // OpenRouter, vLLM, and local servers like llama.cpp's server and Ollama's
 // OpenAI-compat shim. Uses the global fetch (Node 22+). No new dependencies.
+//
+// The AbortController on fetch enforces the timeout passed in from the
+// registry (which reads llm_timeout_ms from settings). On expiry fetch throws
+// an AbortError which we map to provider_timeout.
 
 import type { ExplainInput, ExplainResult, Llm, LlmProvider, OpenAiConfig } from "./llm-types.js";
 import { buildPrompt } from "./llm-prompt.js";
@@ -29,7 +33,7 @@ export const openAiProvider: LlmProvider = {
     return missing.length === 0 ? "" : `Missing: ${missing.join(", ")}`;
   },
 
-  async explain(llm, input: ExplainInput): Promise<ExplainResult> {
+  async explain(llm, input: ExplainInput, timeoutMs: number): Promise<ExplainResult> {
     const cfg = llm.config as OpenAiConfig;
     if (!cfg.base_url || !cfg.model) {
       return {
@@ -38,54 +42,91 @@ export const openAiProvider: LlmProvider = {
         message: "OpenAI-compatible LLM is missing base_url or model. Set them in Settings → LLMs.",
       };
     }
+    return callOpenAi(llm, buildPrompt(input), 1024, timeoutMs);
+  },
 
-    const url = `${cfg.base_url.replace(/\/+$/, "")}/chat/completions`;
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (cfg.api_key) headers.Authorization = `Bearer ${cfg.api_key}`;
-    const body = {
-      model: cfg.model,
-      messages: [{ role: "user", content: buildPrompt(input) }],
-      max_tokens: 1024,
-      temperature: 0.3,
-      stream: false,
-    };
-
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        // Network-level timeouts aren't natively supported by fetch; AbortController
-        // would do it but adds complexity. Most providers respond in <30s; if this
-        // becomes a problem, wire in an AbortController with a configurable timeout.
-      });
-      if (!res.ok) {
-        return classifyHttpError(res.status, await safeReadBody(res), "OpenAI-compatible");
-      }
-      const parsed = (await res.json()) as {
-        choices?: { message?: { content?: string } }[];
-        model?: string;
-        error?: { message?: string };
+  async testConnection(llm, timeoutMs: number): Promise<ExplainResult> {
+    const cfg = llm.config as OpenAiConfig;
+    if (!cfg.base_url || !cfg.model) {
+      return {
+        ok: false,
+        reason: "llm_not_configured",
+        message: openAiProvider.missingHint(llm),
       };
-      if (parsed.error) {
-        return {
-          ok: false,
-          reason: "provider_bad_request",
-          message: `Provider returned an error: ${parsed.error.message ?? "unknown"}`,
-        };
-      }
-      const text = parsed.choices?.[0]?.message?.content?.trim() ?? "";
-      if (!text) {
-        return { ok: false, reason: "empty_response", message: "Provider returned no text content." };
-      }
-      // Many providers echo the resolved model id back in the `model` field;
-      // fall back to the requested model if not present.
-      return { ok: true, text, model: parsed.model ?? cfg.model };
-    } catch (err) {
-      return classifyFetchError(err as Error, "OpenAI-compatible");
     }
+    return callOpenAi(llm, "Reply with the single word OK.", 10, timeoutMs);
   },
 };
+
+// Shared call helper used by both explain() and testConnection(). Builds the
+// OpenAI chat-completions body, sends it via fetch with an AbortController-
+// backed timeout, and classifies failures.
+async function callOpenAi(
+  llm: Llm,
+  prompt: string,
+  maxTokens: number,
+  timeoutMs: number,
+): Promise<ExplainResult> {
+  const cfg = llm.config as OpenAiConfig;
+  const url = `${cfg.base_url.replace(/\/+$/, "")}/chat/completions`;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (cfg.api_key) headers.Authorization = `Bearer ${cfg.api_key}`;
+  const body = {
+    model: cfg.model,
+    messages: [{ role: "user", content: prompt }],
+    max_tokens: maxTokens,
+    temperature: 0.3,
+    stream: false,
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      return classifyHttpError(res.status, await safeReadBody(res), "OpenAI-compatible");
+    }
+    const parsed = (await res.json()) as {
+      choices?: { message?: { content?: string } }[];
+      model?: string;
+      error?: { message?: string };
+    };
+    if (parsed.error) {
+      return {
+        ok: false,
+        reason: "provider_bad_request",
+        message: `Provider returned an error: ${parsed.error.message ?? "unknown"}`,
+      };
+    }
+    const text = parsed.choices?.[0]?.message?.content?.trim() ?? "";
+    if (!text) {
+      return { ok: false, reason: "empty_response", message: "Provider returned no text content." };
+    }
+    // Many providers echo the resolved model id back in the `model` field;
+    // fall back to the requested model if not present.
+    return { ok: true, text, model: parsed.model ?? cfg.model };
+  } catch (err) {
+    const e = err as Error;
+    // Node's fetch throws DOMException with name 'AbortError' when the
+    // signal fires. Some versions wrap it as TypeError: fetch failed with
+    // cause AbortError — sniff both name and message.
+    if (e.name === "AbortError" || /aborted/i.test(e.message)) {
+      return {
+        ok: false,
+        reason: "provider_timeout",
+        message: `OpenAI-compatible provider timed out after ${timeoutMs}ms`,
+      };
+    }
+    return classifyFetchError(e, "OpenAI-compatible");
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function safeReadBody(res: Response): Promise<string> {
   try {

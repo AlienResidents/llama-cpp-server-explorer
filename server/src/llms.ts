@@ -234,7 +234,35 @@ export async function explainWith(
       message: `Unknown provider type: ${llm.provider}`,
     };
   }
-  return provider.explain(llm, input);
+  const timeoutMs = getSettings().llm_timeout_ms;
+  return provider.explain(llm, input, timeoutMs);
+}
+
+// ─── Test connection dispatcher ─────────────────────────────────────────────
+//
+// Used by the POST /api/llms/:id/test route. Sends a minimal prompt to verify
+// the LLM is reachable + authed + can generate. Uses a shorter timeout than
+// explain() so a dead server doesn't hang the UI — capped at 30s regardless
+// of the llm_timeout_ms setting (a test that takes >30s on a tiny prompt is
+// a failure worth knowing about quickly).
+
+export async function testLlm(llm: Llm | null, timeoutMs = 30_000): Promise<ExplainResult> {
+  if (!llm) {
+    return {
+      ok: false,
+      reason: "no_active_llm",
+      message: "LLM not found.",
+    };
+  }
+  const provider = PROVIDERS[llm.provider];
+  if (!provider) {
+    return {
+      ok: false,
+      reason: "unsupported_provider",
+      message: `Unknown provider type: ${llm.provider}`,
+    };
+  }
+  return provider.testConnection(llm, timeoutMs);
 }
 
 // ─── Availability for the UI ──────────────────────────────────────────────

@@ -35,12 +35,17 @@ const SETTING_FIELDS: Record<keyof Settings, { label: string; hint: string }> = 
     label: "Active LLM",
     hint: "Which LLM generates explanations. Edit via the LLMs tab.",
   },
+  llm_timeout_ms: {
+    label: "LLM request timeout (ms)",
+    hint:
+      "How long to wait for an LLM response before aborting. Local models may need 2+ minutes on first load; hosted providers usually respond in <30s. The Test Connection button uses a separate 30s cap.",
+  },
 };
 
 const SECTIONS: { title: string; keys: (keyof Settings)[] }[] = [
   { title: "Cache & UI", keys: ["cache_ttl_hours", "toast_duration_ms"] },
   { title: "Lookups", keys: ["github_issue_search_limit", "enable_source_code_lookup", "enable_issue_lookup"] },
-  { title: "LLM explanation", keys: ["enable_llm_explanation", "active_llm_id"] },
+  { title: "LLM explanation", keys: ["enable_llm_explanation", "active_llm_id", "llm_timeout_ms"] },
 ];
 
 const PARSER_LABELS: Record<ParserType, string> = {
@@ -535,6 +540,8 @@ function LlmsPanel({
 }) {
   const [adding, setAdding] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; message: string } | undefined>>({});
 
   async function handleDelete(id: string) {
     if (!window.confirm(`Delete LLM "${id}"?`)) return;
@@ -563,6 +570,35 @@ function LlmsPanel({
       onActiveChange(res.settings.active_llm_id);
     } catch (e) {
       setError((e as Error).message);
+    }
+  }
+
+  async function handleTest(id: string) {
+    setTestingId(id);
+    // Clear any previous result for this LLM so the user sees "Testing…"
+    // rather than a stale pass/fail while the request is in flight.
+    setTestResults((prev) => ({ ...prev, [id]: undefined }));
+    try {
+      const res = await api.testLlm(id);
+      if (res.ok) {
+        setTestResults((prev) => ({
+          ...prev,
+          [id]: { ok: true, message: `Connected — model: ${res.model}` },
+        }));
+      } else {
+        setTestResults((prev) => ({
+          ...prev,
+          [id]: { ok: false, message: res.message },
+        }));
+      }
+    } catch (e) {
+      // Only fires on non-200 (e.g. 404 if the LLM was deleted elsewhere).
+      setTestResults((prev) => ({
+        ...prev,
+        [id]: { ok: false, message: (e as Error).message },
+      }));
+    } finally {
+      setTestingId(null);
     }
   }
 
@@ -613,11 +649,29 @@ function LlmsPanel({
                       Set active
                     </button>
                   )}
+                  <button
+                    onClick={() => void handleTest(l.id)}
+                    disabled={testingId === l.id}
+                  >
+                    {testingId === l.id ? "Testing…" : "Test"}
+                  </button>
                   <button onClick={() => setEditId(l.id)}>Edit</button>
                   {!l.is_default && (
                     <button className="danger" onClick={() => void handleDelete(l.id)}>Delete</button>
                   )}
                 </div>
+                {testResults[l.id] && (
+                  <div
+                    style={{
+                      fontSize: 12,
+                      marginTop: 6,
+                      color: testResults[l.id]!.ok ? "var(--accent)" : "var(--danger)",
+                    }}
+                  >
+                    {testResults[l.id]!.ok ? "✓ " : "✗ "}
+                    {testResults[l.id]!.message}
+                  </div>
+                )}
               </>
             )}
           </div>

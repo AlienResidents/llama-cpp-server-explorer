@@ -19,6 +19,13 @@ export type SettingsShape = {
   // llms.ts. LLM-specific config (model id, region, base URL, api key, etc.)
   // is stored on the llms row itself, not here.
   active_llm_id: string;
+  // How long to wait for an LLM response before aborting, in milliseconds.
+  // Enforced via AbortController on all providers. Local models (llama.cpp,
+  // Ollama) may need 2+ minutes on first load (model weights load + inference);
+  // hosted providers (Together.ai, OpenAI, Bedrock) usually respond in <30s.
+  // The Test Connection button uses a separate, shorter 30s cap so a dead
+  // server doesn't hang the UI for the full timeout.
+  llm_timeout_ms: number;
 };
 
 export const DEFAULT_SETTINGS: SettingsShape = {
@@ -33,6 +40,9 @@ export const DEFAULT_SETTINGS: SettingsShape = {
   // populates this during v2→v3 migration if the user had a bedrock_model_id
   // configured, so existing setups keep working without a Settings visit.
   active_llm_id: "",
+  // 2 minutes — generous for slow local models that need to load weights on
+  // first call. Lower this if you only use hosted providers.
+  llm_timeout_ms: 120_000,
 };
 
 const SETTING_TYPES: Record<keyof SettingsShape, "number" | "string" | "boolean"> = {
@@ -44,6 +54,7 @@ const SETTING_TYPES: Record<keyof SettingsShape, "number" | "string" | "boolean"
   enable_source_code_lookup: "boolean",
   enable_issue_lookup: "boolean",
   active_llm_id: "string",
+  llm_timeout_ms: "number",
 };
 
 function coerce<K extends keyof SettingsShape>(key: K, raw: string): SettingsShape[K] {

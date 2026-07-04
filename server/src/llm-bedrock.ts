@@ -1,6 +1,10 @@
 // Bedrock provider — Anthropic Claude via the AWS SDK. Keeps the existing
 // auth model (AWS SDK credential chain via env vars) and the Anthropic
 // request/response body shape. Config carries the model id + region.
+//
+// The AbortController on the SDK call enforces the timeout passed in from the
+// registry (which reads llm_timeout_ms from settings). AWS SDK v3 accepts an
+// abortSignal in the per-request options bag passed to client.send().
 
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import type { BedrockConfig, ExplainInput, ExplainResult, Llm, LlmProvider } from "./llm-types.js";
@@ -29,13 +33,13 @@ export const bedrockProvider: LlmProvider = {
     const missing: string[] = [];
     if (!cfg.model_id) missing.push("model_id");
     if (!cfg.region) missing.push("region");
-    if (!this.hasCredentials(llm)) {
+    if (!bedrockProvider.hasCredentials(llm)) {
       missing.push("AWS credentials (AWS_PROFILE / AWS_ACCESS_KEY_ID / AWS_ROLE_ARN)");
     }
     return missing.length === 0 ? "" : `Missing: ${missing.join(", ")}`;
   },
 
-  async explain(llm, input: ExplainInput): Promise<ExplainResult> {
+  async explain(llm, input: ExplainInput, timeoutMs: number): Promise<ExplainResult> {
     const cfg = llm.config as BedrockConfig;
     if (!cfg.model_id || !cfg.region) {
       return {
@@ -52,40 +56,86 @@ export const bedrockProvider: LlmProvider = {
           "No AWS credentials in the environment. Set AWS_PROFILE / AWS_ACCESS_KEY_ID / AWS_ROLE_ARN before starting the server.",
       };
     }
+    return callBedrock(llm, buildPrompt(input), 1024, timeoutMs);
+  },
 
-    const client = new BedrockRuntimeClient({ region: cfg.region });
-    const prompt = buildPrompt(input);
-    const body = {
-      anthropic_version: "bedrock-2023-05-31",
-      max_tokens: 1024,
-      messages: [{ role: "user", content: prompt }],
-    };
-
-    try {
-      const cmd = new InvokeModelCommand({
-        modelId: cfg.model_id,
-        contentType: "application/json",
-        accept: "application/json",
-        body: JSON.stringify(body),
-      });
-      const res = await client.send(cmd);
-      const decoded = new TextDecoder().decode(res.body);
-      const parsed = JSON.parse(decoded) as { content?: { type: string; text?: string }[] };
-      const text =
-        parsed.content
-          ?.filter((c) => c.type === "text")
-          .map((c) => c.text ?? "")
-          .join("\n")
-          .trim() ?? "";
-      if (!text) {
-        return { ok: false, reason: "empty_response", message: "Bedrock returned no text content." };
-      }
-      return { ok: true, text, model: cfg.model_id };
-    } catch (err) {
-      return classifyBedrockError(err as { name?: string; message?: string });
+  async testConnection(llm, timeoutMs: number): Promise<ExplainResult> {
+    const cfg = llm.config as BedrockConfig;
+    if (!cfg.model_id || !cfg.region) {
+      return {
+        ok: false,
+        reason: "llm_not_configured",
+        message: bedrockProvider.missingHint(llm),
+      };
     }
+    if (!bedrockProvider.hasCredentials(llm)) {
+      return {
+        ok: false,
+        reason: "credentials_missing",
+        message: bedrockProvider.missingHint(llm),
+      };
+    }
+    return callBedrock(llm, "Reply with the single word OK.", 10, timeoutMs);
   },
 };
+
+// Shared call helper used by both explain() and testConnection(). Builds the
+// Anthropic-shaped body, sends it via the AWS SDK with an AbortController-
+// backed timeout, and classifies failures into the provider-agnostic reason
+// vocabulary.
+async function callBedrock(
+  llm: Llm,
+  prompt: string,
+  maxTokens: number,
+  timeoutMs: number,
+): Promise<ExplainResult> {
+  const cfg = llm.config as BedrockConfig;
+  const client = new BedrockRuntimeClient({ region: cfg.region });
+  const body = {
+    anthropic_version: "bedrock-2023-05-31",
+    max_tokens: maxTokens,
+    messages: [{ role: "user", content: prompt }],
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const cmd = new InvokeModelCommand({
+      modelId: cfg.model_id,
+      contentType: "application/json",
+      accept: "application/json",
+      body: JSON.stringify(body),
+    });
+    const res = await client.send(cmd, { abortSignal: controller.signal });
+    const decoded = new TextDecoder().decode(res.body);
+    const parsed = JSON.parse(decoded) as { content?: { type: string; text?: string }[] };
+    const text =
+      parsed.content
+        ?.filter((c) => c.type === "text")
+        .map((c) => c.text ?? "")
+        .join("\n")
+        .trim() ?? "";
+    if (!text) {
+      return { ok: false, reason: "empty_response", message: "Bedrock returned no text content." };
+    }
+    return { ok: true, text, model: cfg.model_id };
+  } catch (err) {
+    const e = err as { name?: string; message?: string };
+    // AbortController fires — AWS SDK v3 throws with name 'AbortError' or a
+    // message containing 'abort'. Check before the general classifier so we
+    // return provider_timeout instead of provider_call_failed.
+    if (e.name === "AbortError" || /abort/i.test(e.message ?? "")) {
+      return {
+        ok: false,
+        reason: "provider_timeout",
+        message: `Bedrock request timed out after ${timeoutMs}ms`,
+      };
+    }
+    return classifyBedrockError(e);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function classifyBedrockError(err: { name?: string; message?: string }): ExplainResult {
   const name = err.name ?? "Error";

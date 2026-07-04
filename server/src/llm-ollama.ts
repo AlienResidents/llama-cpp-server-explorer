@@ -1,6 +1,10 @@
 // Ollama native provider — talks to Ollama's /api/chat endpoint (not the
 // OpenAI-compat shim). Exposes keep_alive, which the OpenAI shim doesn't.
 // No auth; config carries the base URL + model name + keep_alive.
+//
+// The AbortController on fetch enforces the timeout passed in from the
+// registry (which reads llm_timeout_ms from settings). On expiry fetch throws
+// an AbortError which we map to provider_timeout.
 
 import type { ExplainInput, ExplainResult, Llm, LlmProvider, OllamaConfig } from "./llm-types.js";
 import { buildPrompt } from "./llm-prompt.js";
@@ -26,7 +30,7 @@ export const ollamaProvider: LlmProvider = {
     return missing.length === 0 ? "" : `Missing: ${missing.join(", ")}`;
   },
 
-  async explain(llm, input: ExplainInput): Promise<ExplainResult> {
+  async explain(llm, input: ExplainInput, timeoutMs: number): Promise<ExplainResult> {
     const cfg = llm.config as OllamaConfig;
     if (!cfg.base_url || !cfg.model) {
       return {
@@ -35,47 +39,84 @@ export const ollamaProvider: LlmProvider = {
         message: "Ollama LLM is missing base_url or model. Set them in Settings → LLMs.",
       };
     }
+    return callOllama(llm, buildPrompt(input), 1024, timeoutMs);
+  },
 
-    const url = `${cfg.base_url.replace(/\/+$/, "")}/api/chat`;
-    const body = {
-      model: cfg.model,
-      messages: [{ role: "user", content: buildPrompt(input) }],
-      stream: false,
-      options: { temperature: 0.3 },
-      keep_alive: cfg.keep_alive || "5m",
-    };
-
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        return classifyHttpError(res.status, await safeReadBody(res));
-      }
-      const parsed = (await res.json()) as {
-        message?: { content?: string };
-        model?: string;
-        error?: string;
+  async testConnection(llm, timeoutMs: number): Promise<ExplainResult> {
+    const cfg = llm.config as OllamaConfig;
+    if (!cfg.base_url || !cfg.model) {
+      return {
+        ok: false,
+        reason: "llm_not_configured",
+        message: ollamaProvider.missingHint(llm),
       };
-      if (parsed.error) {
-        return {
-          ok: false,
-          reason: "provider_bad_request",
-          message: `Ollama returned an error: ${parsed.error}`,
-        };
-      }
-      const text = parsed.message?.content?.trim() ?? "";
-      if (!text) {
-        return { ok: false, reason: "empty_response", message: "Ollama returned no text content." };
-      }
-      return { ok: true, text, model: parsed.model ?? cfg.model };
-    } catch (err) {
-      return classifyFetchError(err as Error);
     }
+    return callOllama(llm, "Reply with the single word OK.", 10, timeoutMs);
   },
 };
+
+// Shared call helper used by both explain() and testConnection(). Builds the
+// Ollama /api/chat body, sends it via fetch with an AbortController-backed
+// timeout, and classifies failures.
+async function callOllama(
+  llm: Llm,
+  prompt: string,
+  maxTokens: number,
+  timeoutMs: number,
+): Promise<ExplainResult> {
+  const cfg = llm.config as OllamaConfig;
+  const url = `${cfg.base_url.replace(/\/+$/, "")}/api/chat`;
+  const body = {
+    model: cfg.model,
+    messages: [{ role: "user", content: prompt }],
+    stream: false,
+    options: { temperature: 0.3 },
+    keep_alive: cfg.keep_alive || "5m",
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      return classifyHttpError(res.status, await safeReadBody(res));
+    }
+    const parsed = (await res.json()) as {
+      message?: { content?: string };
+      model?: string;
+      error?: string;
+    };
+    if (parsed.error) {
+      return {
+        ok: false,
+        reason: "provider_bad_request",
+        message: `Ollama returned an error: ${parsed.error}`,
+      };
+    }
+    const text = parsed.message?.content?.trim() ?? "";
+    if (!text) {
+      return { ok: false, reason: "empty_response", message: "Ollama returned no text content." };
+    }
+    return { ok: true, text, model: parsed.model ?? cfg.model };
+  } catch (err) {
+    const e = err as Error;
+    if (e.name === "AbortError" || /aborted/i.test(e.message)) {
+      return {
+        ok: false,
+        reason: "provider_timeout",
+        message: `Ollama timed out after ${timeoutMs}ms`,
+      };
+    }
+    return classifyFetchError(e);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function safeReadBody(res: Response): Promise<string> {
   try {

@@ -210,6 +210,13 @@ active LLM shows an `active` badge. The Generate button is disabled until the
 active LLM is both configured (required fields filled) and has credentials
 (env vars for Bedrock, api_key for hosted OpenAI-compat providers).
 
+**Test connection** — each LLM row has a **Test** button that sends a minimal
+prompt ("Reply with the single word OK.") to verify the server is reachable,
+auth works, the model exists, and can generate. The result appears inline:
+green ✓ for pass, red ✗ with the failure reason for fail. The test uses a
+separate 30-second timeout (independent of the `llm_timeout_ms` setting) so a
+dead server doesn't hang the UI.
+
 **Add a custom LLM** in Settings → LLMs → **+ Add custom LLM**. Pick a
 provider, fill the config fields. Provider is immutable after creation —
 delete + re-add to change. Custom LLMs can be deleted; default LLMs can be
@@ -228,6 +235,9 @@ Click **⚙ Settings** in the header. The General tab adjusts:
 - Issue search limit
 - Toggles for source-code lookup, issue lookup, LLM explanation
 - Active LLM (read-only here — change via the LLMs tab)
+- LLM request timeout (ms) — how long to wait before aborting. Default
+  120000 (2 min). Local models may need more on first load; hosted providers
+  usually respond in <30s.
 
 The Sources tab manages the source list. The LLMs tab manages the LLM list
 (see above). All settings persist server-side in SQLite. Reset returns all
@@ -253,6 +263,7 @@ status is returned in every payload as `{ data, cache: { age_ms, status, was_ref
 | POST   | `/api/llms`                                         | Create custom LLM                        |
 | PUT    | `/api/llms/:id`                                     | Update LLM                               |
 | DELETE | `/api/llms/:id`                                     | Delete LLM (non-default only)            |
+| POST   | `/api/llms/:id/test`                                | Test LLM connection (200 always)         |
 | GET    | `/api/sources/:id/options[?force=1]`                | Options for a source                     |
 | GET    | `/api/sources/:id/options/:opt[?force=1]`           | Option detail                            |
 | POST   | `/api/sources/:id/options/:opt/refresh`             | Force-refresh source + issues            |

@@ -104,6 +104,7 @@ export type Settings = {
   enable_source_code_lookup: boolean;
   enable_issue_lookup: boolean;
   active_llm_id: string;
+  llm_timeout_ms: number;
 };
 
 export type Meta = {

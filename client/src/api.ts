@@ -102,6 +102,14 @@ export const api = {
     send<{ llm: Llm }>(`/api/llms/${enc(id)}`, "PUT", patch),
   deleteLlm: (id: string) =>
     send<{ ok: boolean }>(`/api/llms/${enc(id)}`, "DELETE"),
+  // Test connection — always returns 200 from the server (test endpoint
+  // success ≠ LLM success). The body carries { ok, ... } so the client can
+  // display the result uniformly. Only throws on 404 (LLM id not found).
+  testLlm: (id: string) =>
+    send<
+      | { ok: true; text: string; model: string }
+      | { ok: false; reason: string; message: string }
+    >(`/api/llms/${enc(id)}/test`, "POST"),
 };
 
 export type LlmDraft = {
