@@ -9,6 +9,34 @@ plain-English explanation generated via a configurable LLM — AWS Bedrock
 Groq / OpenRouter / vLLM / llama.cpp server / Ollama's OpenAI shim), or
 Ollama's native `/api/chat`.
 
+## Contents
+
+- [Screenshots](#screenshots)
+  - [Option detail with generated explanation](#option-detail-with-generated-explanation)
+  - [Generating an explanation — before / after](#generating-an-explanation--before--after)
+- [Stack](#stack)
+- [Cache & validation behaviour](#cache--validation-behaviour)
+- [Install](#install)
+  - [macOS](#macos)
+  - [Linux](#linux)
+  - [Windows](#windows)
+  - [WSL2](#wsl2)
+  - [Audit-first install](#audit-first-install)
+  - [Run](#run)
+  - [Upgrading](#upgrading)
+  - [Pre-flight requirements](#pre-flight-requirements)
+- [Run from source (development)](#run-from-source-development)
+- [Sources](#sources)
+- [LLMs](#llms)
+- [Settings](#settings)
+- [API](#api)
+- [LLM auth](#llm-auth)
+  - [v2 → v3 migration](#v2--v3-migration)
+- [App Generation](#app-generation)
+  - [Initial prompt](#initial-prompt)
+  - [Clarifying Q&A](#clarifying-qa)
+  - [Follow-up requirements (added mid-build)](#follow-up-requirements-added-mid-build)
+
 ## Screenshots
 
 ### Option detail with generated explanation
