@@ -4,7 +4,10 @@ Local web UI that lets you dig into the CLI options of llama.cpp's tools —
 the HTTP server and llama-bench out of the box, with support for adding
 custom sources. Each option pulls the README description, the matching C++
 definition (when available), related GitHub issues/PRs, and an optional
-plain-English explanation generated via AWS Bedrock (Claude Opus).
+plain-English explanation generated via a configurable LLM — AWS Bedrock
+(Anthropic Claude), any OpenAI-compatible endpoint (Together.ai / OpenAI /
+Groq / OpenRouter / vLLM / llama.cpp server / Ollama's OpenAI shim), or
+Ollama's native `/api/chat`.
 
 ## Screenshots
 
@@ -23,9 +26,10 @@ left stays available for navigation; selection is highlighted.
 ### Generating an explanation — before / after
 
 Explanations are generated on demand, not at index time. The README + C++
-definition + any related issues are bundled into a single Bedrock call, the
+definition + any related issues are bundled into a single LLM call, the
 result is cached server-side keyed by option id, and the button flips from
-*Generate* to *Regenerate* once cached. The C++ definition and related
+*Generate* to *Regenerate* once cached. The LLM is picked in Settings →
+LLMs; if none is active, the button no-ops cleanly. The C++ definition and related
 issues/PRs are visible without an explanation — the LLM blurb is purely
 additive context for terse flags.
 
@@ -132,6 +136,44 @@ pnpm start
 
 Then open http://localhost:8787 in your browser. The Hono server serves
 both the API and the built client from a single port.
+
+### Upgrading
+
+The schema is versioned (currently v3). Migrations run automatically on
+startup and are non-destructive — your SQLite cache, custom sources, custom
+LLMs, and explanations are preserved across upgrades. See [v2 → v3
+migration](#v2--v3-migration) below for what happens to pre-multi-LLM
+installs.
+
+**Script install** (macOS / Linux / Windows / WSL2): re-run the same
+install command you used originally. The install dir is overwritten in
+place, and `data/explorer.db` is preserved.
+
+```bash
+# macOS / Linux — same command as install
+curl -fsSL https://raw.githubusercontent.com/AlienResidents/llama-cpp-server-explorer/main/scripts/install.bash | bash
+# custom location: append `-s -- /path/to/dir` as before
+```
+
+```powershell
+# Windows — same command as install
+iwr -useb https://raw.githubusercontent.com/AlienResidents/llama-cpp-server-explorer/main/scripts/install.ps1 | iex
+```
+
+Then `cd <INSTALL_DIR> && pnpm start` as before.
+
+**Git source install** (development checkout):
+
+```bash
+git pull
+pnpm install --frozen-lockfile
+pnpm build
+pnpm start
+```
+
+If the frontend was already built (`dist/client/` exists), `pnpm start` is
+enough — the schema migration runs on boot. Rebuild only if you pulled
+client or server source changes.
 
 ### Pre-flight requirements
 
