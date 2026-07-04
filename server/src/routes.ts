@@ -24,7 +24,19 @@ import {
   type ParserType,
   type Source,
 } from "./sources.js";
-import { explainOption } from "./bedrock.js";
+import {
+  activeLlmAvailability,
+  createLlm,
+  deleteLlm,
+  explainWith,
+  getActiveLlm,
+  getLlm,
+  listLlms,
+  updateLlm,
+  type Llm,
+  type LlmProviderType,
+} from "./llms.js";
+import type { ExplainReason } from "./llm-types.js";
 
 export const api = new Hono();
 
@@ -121,21 +133,57 @@ api.delete("/sources/:id", (c) => {
   return c.json({ ok: true });
 });
 
+// ─── LLMs CRUD ──────────────────────────────────────────────────────────────
+
+api.get("/llms", (c) => {
+  return c.json({ llms: listLlms() });
+});
+
+api.post("/llms", async (c) => {
+  const body = (await c.req.json()) as {
+    id: string;
+    name: string;
+    provider: LlmProviderType;
+    config: Record<string, unknown>;
+  };
+  if (getLlm(body.id)) return c.json({ error: "id already exists" }, 409);
+  const created = createLlm(body as Omit<Llm, "is_default">);
+  return c.json({ llm: created }, 201);
+});
+
+api.put("/llms/:id", async (c) => {
+  const id = c.req.param("id");
+  const existing = getLlm(id);
+  if (!existing) return c.json({ error: "llm not found" }, 404);
+  const patch = (await c.req.json()) as Partial<Omit<Llm, "id" | "is_default">>;
+  const updated = updateLlm(id, patch);
+  return c.json({ llm: updated });
+});
+
+api.delete("/llms/:id", (c) => {
+  const id = c.req.param("id");
+  const existing = getLlm(id);
+  if (!existing) return c.json({ error: "llm not found" }, 404);
+  if (existing.is_default) return c.json({ error: "cannot delete default llm" }, 400);
+  deleteLlm(id);
+  return c.json({ ok: true });
+});
+
 // ─── Meta route — used by the client on boot ────────────────────────────────
 
 api.get("/meta", (c) => {
   const settings = getSettings();
   const sources = listSources();
-  const bedrockAvailable =
-    !!process.env.AWS_PROFILE ||
-    !!process.env.AWS_ACCESS_KEY_ID ||
-    !!process.env.AWS_ROLE_ARN ||
-    !!process.env.AWS_WEB_IDENTITY_TOKEN_FILE;
+  const llms = listLlms();
+  const availability = activeLlmAvailability();
   return c.json({
     settings,
     defaults: DEFAULT_SETTINGS,
     sources,
-    bedrock_available: bedrockAvailable,
+    llms,
+    // Replaces the old bedrock_available boolean. The client uses this to
+    // decide whether to enable the Generate button and what tooltip to show.
+    llm_availability: availability,
   });
 });
 
@@ -272,6 +320,7 @@ const getDetail = db.prepare(`
          source_fetched_at as sourceFetchedAt,
          issues_json as issuesJson, issues_fetched_at as issuesFetchedAt,
          explanation, explanation_model as explanationModel,
+         explanation_llm_id as explanationLlmId,
          explanation_fetched_at as explanationFetchedAt
   FROM option_details WHERE source_id = ? AND option_id = ?
 `);
@@ -294,11 +343,13 @@ const upsertDetailIssues = db.prepare(`
 `);
 
 const upsertDetailExplanation = db.prepare(`
-  INSERT INTO option_details (source_id, option_id, explanation, explanation_model, explanation_fetched_at)
-  VALUES (?, ?, ?, ?, ?)
+  INSERT INTO option_details (source_id, option_id, explanation, explanation_model,
+                               explanation_llm_id, explanation_fetched_at)
+  VALUES (?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, option_id) DO UPDATE SET
     explanation = excluded.explanation,
     explanation_model = excluded.explanation_model,
+    explanation_llm_id = excluded.explanation_llm_id,
     explanation_fetched_at = excluded.explanation_fetched_at
 `);
 
@@ -310,6 +361,7 @@ type DetailRow = {
   issuesFetchedAt: number | null;
   explanation: string | null;
   explanationModel: string | null;
+  explanationLlmId: string | null;
   explanationFetchedAt: number | null;
 };
 
@@ -328,6 +380,14 @@ async function refreshIssuesFor(source: Source, opt: { id: string; flags: string
   if (!settings.enable_issue_lookup) return;
   const issues = await searchIssues(source, opt.flags);
   upsertDetailIssues.run(source.id, opt.id, JSON.stringify(issues), Date.now());
+}
+
+// Resolve the LLM display name for a cached explanation. Pre-multi-LLM rows
+// have explanation_llm_id = NULL; we fall back to showing the raw model id.
+function llmNameFor(llmId: string | null): string | null {
+  if (!llmId) return null;
+  const llm = getLlm(llmId);
+  return llm?.name ?? null;
 }
 
 api.get("/sources/:sourceId/options/:id", async (c) => {
@@ -385,6 +445,8 @@ api.get("/sources/:sourceId/options/:id", async (c) => {
         ? {
             text: detail.explanation,
             model: detail.explanationModel,
+            llm_id: detail.explanationLlmId,
+            llm_name: llmNameFor(detail.explanationLlmId),
             fetched_at: detail.explanationFetchedAt,
           }
         : null,
@@ -421,7 +483,16 @@ api.post("/sources/:sourceId/options/:id/explain", async (c) => {
   const opt = rowToOption(optRow);
   const detail = getDetail.get(source.id, id) as DetailRow | undefined;
 
-  const result = await explainOption({
+  const settings = getSettings();
+  if (!settings.enable_llm_explanation) {
+    return c.json(
+      { error: "LLM explanations are disabled in Settings.", reason: "llm_disabled" },
+      503,
+    );
+  }
+
+  const activeLlm = getActiveLlm();
+  const result = await explainWith(activeLlm, {
     flags: opt.flags,
     description: opt.description,
     defaultValue: opt.defaultValue,
@@ -432,33 +503,44 @@ api.post("/sources/:sourceId/options/:id/explain", async (c) => {
   if (!result.ok) {
     // Map each failure reason to an appropriate HTTP status. Distinguish
     // 'config not set' (503 — server can't even try) from 'upstream said
-    // no' (502 — Bedrock rejected what we sent) from 'upstream busy' (429).
-    const STATUS_BY_REASON: Record<typeof result.reason, 400 | 401 | 403 | 404 | 429 | 502 | 503> = {
+    // no' (4xx/502 — provider rejected what we sent) from 'upstream busy'
+    // (429). This map is provider-agnostic — each provider maps its internal
+    // errors to these reasons.
+    const STATUS_BY_REASON: Record<ExplainReason, 400 | 401 | 403 | 404 | 429 | 500 | 502 | 503 | 504> = {
       llm_disabled: 503,
-      model_id_empty: 503,
-      aws_credentials_missing: 503,
-      aws_validation_error: 400,
-      aws_access_denied: 403,
-      aws_resource_not_found: 404,
-      aws_throttling: 429,
-      aws_call_failed: 502,
+      no_active_llm: 503,
+      llm_not_configured: 503,
+      credentials_missing: 503,
+      provider_unreachable: 502,
+      provider_timeout: 504,
+      provider_auth_error: 401,
+      provider_not_found: 404,
+      provider_rate_limited: 429,
+      provider_bad_request: 400,
+      provider_server_error: 502,
+      provider_call_failed: 502,
       empty_response: 502,
+      unsupported_provider: 500,
     };
     const status = STATUS_BY_REASON[result.reason];
     return c.json({ error: result.message, reason: result.reason }, status);
   }
 
+  const llmId = activeLlm?.id ?? null;
   upsertDetailExplanation.run(
     source.id,
     id,
-    result.explanation.text,
-    result.explanation.model,
+    result.text,
+    result.model,
+    llmId,
     Date.now(),
   );
   return c.json({
     explanation: {
-      text: result.explanation.text,
-      model: result.explanation.model,
+      text: result.text,
+      model: result.model,
+      llm_id: llmId,
+      llm_name: llmNameFor(llmId),
       fetched_at: Date.now(),
     },
   });

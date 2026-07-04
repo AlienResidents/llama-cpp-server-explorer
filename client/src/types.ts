@@ -18,6 +18,46 @@ export type Source = {
   is_default: boolean;
 };
 
+// ─── LLM types (mirror of server/src/llm-types.ts) ──────────────────────────
+
+export type LlmProviderType = "bedrock" | "openai" | "ollama";
+
+export type BedrockConfig = {
+  model_id: string;
+  region: string;
+};
+
+export type OpenAiConfig = {
+  base_url: string;
+  api_key: string;
+  model: string;
+};
+
+export type OllamaConfig = {
+  base_url: string;
+  model: string;
+  keep_alive: string;
+};
+
+export type LlmConfig = BedrockConfig | OpenAiConfig | OllamaConfig;
+
+export type Llm = {
+  id: string;
+  name: string;
+  provider: LlmProviderType;
+  config: LlmConfig;
+  is_default: boolean;
+};
+
+// Availability snapshot the client uses to decide whether the Generate button
+// is enabled and what tooltip/hint to show. Mirrors the server's
+// activeLlmAvailability() union.
+export type LlmAvailability =
+  | { status: "ready"; llm: Llm }
+  | { status: "missing-credentials"; llm: Llm; hint: string }
+  | { status: "not-configured"; llm: Llm; hint: string }
+  | { status: "no-active-llm" };
+
 export type Option = {
   id: string;
   category: string;
@@ -45,7 +85,13 @@ export type OptionDetail = {
   issues: IssueRef[];
   issues_fetched_at: number | null;
   explanation:
-    | { text: string; model: string | null; fetched_at: number | null }
+    | {
+        text: string;
+        model: string | null;
+        llm_id: string | null;
+        llm_name: string | null;
+        fetched_at: number | null;
+      }
     | null;
 };
 
@@ -57,15 +103,15 @@ export type Settings = {
   enable_llm_explanation: boolean;
   enable_source_code_lookup: boolean;
   enable_issue_lookup: boolean;
-  bedrock_model_id: string;
-  bedrock_region: string;
+  active_llm_id: string;
 };
 
 export type Meta = {
   settings: Settings;
   defaults: Settings;
   sources: Source[];
-  bedrock_available: boolean;
+  llms: Llm[];
+  llm_availability: LlmAvailability;
 };
 
 export type ApiEnvelope<T> = { data: T; cache: CacheMeta };

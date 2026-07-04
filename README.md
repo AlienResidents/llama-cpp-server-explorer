@@ -48,8 +48,10 @@ explanation**. Result is cached so subsequent loads serve instantly:
 - **Cache:**
   - Server-side: SQLite (`better-sqlite3`) — durable, source of truth
   - Client-side: IndexedDB (`idb`) — instant first-paint mirror
-- **LLM (optional):** AWS Bedrock SDK → Claude Opus 4.7 inference profile
-  (gracefully no-ops if AWS creds aren't available)
+- **LLM (optional):** Multi-provider — AWS Bedrock (Anthropic via AWS SDK),
+  OpenAI-compatible (Together.ai / OpenAI / llama.cpp server / vLLM / Groq /
+  OpenRouter / Ollama's OpenAI shim), and Ollama native (`/api/chat`).
+  Configured via Settings → LLMs; gracefully no-ops if no LLM is active.
 
 ## Cache & validation behaviour
 
@@ -179,6 +181,44 @@ raw README URL, an optional `arg.cpp`-style URL, the `owner/repo` for
 GitHub issue search, and pick a parser. Custom sources can be deleted;
 default sources can be edited but not deleted.
 
+## LLMs
+
+The app ships with three preset LLMs, one per supported provider:
+
+| ID                | Provider             | Default target                            |
+| ----------------- | -------------------- | ----------------------------------------- |
+| `bedrock-default` | `bedrock`            | AWS Bedrock (Anthropic Claude), empty model id |
+| `openai-together` | `openai`             | Together.ai, `zai-org/GLM-5.2`, empty api key |
+| `ollama-default`  | `ollama`             | `http://localhost:11434`, empty model     |
+
+**Providers:**
+
+- **`bedrock`** — Anthropic Claude via the AWS SDK. Auth comes from the
+  environment (`AWS_PROFILE` / `AWS_ACCESS_KEY_ID` / `AWS_ROLE_ARN`). Config:
+  `model_id` (foundation-model id or inference-profile ARN) + `region`.
+- **`openai`** — Any endpoint that speaks the OpenAI Chat Completions API
+  (`POST {base_url}/chat/completions`). Covers Together.ai, OpenAI, Groq,
+  OpenRouter, vLLM, and local servers like llama.cpp's `--server` and Ollama's
+  OpenAI-compat shim. Config: `base_url` + `api_key` (empty for no-auth local
+  servers) + `model`.
+- **`ollama`** — Ollama's native `/api/chat` endpoint. Exposes `keep_alive`
+  (how long the model stays loaded), which the OpenAI shim doesn't. Config:
+  `base_url` + `model` + `keep_alive`.
+
+**Switch active LLM** in Settings → LLMs via the **Set active** button. The
+active LLM shows an `active` badge. The Generate button is disabled until the
+active LLM is both configured (required fields filled) and has credentials
+(env vars for Bedrock, api_key for hosted OpenAI-compat providers).
+
+**Add a custom LLM** in Settings → LLMs → **+ Add custom LLM**. Pick a
+provider, fill the config fields. Provider is immutable after creation —
+delete + re-add to change. Custom LLMs can be deleted; default LLMs can be
+edited but not deleted.
+
+API keys are stored in plaintext in SQLite. This is acceptable for a
+local-only dev tool; don't deploy this app to a shared host without an
+auth layer in front.
+
 ## Settings
 
 Click **⚙ Settings** in the header. The General tab adjusts:
@@ -187,11 +227,12 @@ Click **⚙ Settings** in the header. The General tab adjusts:
 - Toast duration (ms)
 - Issue search limit
 - Toggles for source-code lookup, issue lookup, LLM explanation
-- Bedrock model id + region
+- Active LLM (read-only here — change via the LLMs tab)
 
-The Sources tab manages the source list above. All settings persist
-server-side in SQLite. Reset returns all keys to defaults; sources are not
-affected by Reset (delete them individually if needed).
+The Sources tab manages the source list. The LLMs tab manages the LLM list
+(see above). All settings persist server-side in SQLite. Reset returns all
+keys to defaults; sources and LLMs are not affected by Reset (delete them
+individually if needed).
 
 ## API
 
@@ -200,7 +241,7 @@ status is returned in every payload as `{ data, cache: { age_ms, status, was_ref
 
 | Method | Path                                                | Purpose                                  |
 | ------ | --------------------------------------------------- | ---------------------------------------- |
-| GET    | `/api/meta`                                         | Boot info: settings, sources, bedrock    |
+| GET    | `/api/meta`                                         | Boot info: settings, sources, llms, availability |
 | GET    | `/api/settings`                                     | Current settings + defaults              |
 | PUT    | `/api/settings`                                     | Patch settings                           |
 | POST   | `/api/settings/reset`                               | Reset to defaults                        |
@@ -208,6 +249,10 @@ status is returned in every payload as `{ data, cache: { age_ms, status, was_ref
 | POST   | `/api/sources`                                      | Create custom source                     |
 | PUT    | `/api/sources/:id`                                  | Update source                            |
 | DELETE | `/api/sources/:id`                                  | Delete source (non-default only)         |
+| GET    | `/api/llms`                                         | List LLMs                                |
+| POST   | `/api/llms`                                         | Create custom LLM                        |
+| PUT    | `/api/llms/:id`                                     | Update LLM                               |
+| DELETE | `/api/llms/:id`                                     | Delete LLM (non-default only)            |
 | GET    | `/api/sources/:id/options[?force=1]`                | Options for a source                     |
 | GET    | `/api/sources/:id/options/:opt[?force=1]`           | Option detail                            |
 | POST   | `/api/sources/:id/options/:opt/refresh`             | Force-refresh source + issues            |
@@ -215,9 +260,9 @@ status is returned in every payload as `{ data, cache: { age_ms, status, was_ref
 
 All `GET` payloads are wrapped as `{ data, cache: { age_ms, status, was_refreshed } }`.
 
-## Bedrock auth
+## LLM auth
 
-The Bedrock client uses the default AWS SDK credential chain. Easiest local setup:
+**Bedrock:** uses the default AWS SDK credential chain. Easiest local setup:
 
 ```bash
 export AWS_PROFILE=...           # or use ambient creds
@@ -225,10 +270,35 @@ export AWS_REGION=ap-southeast-4 # or whichever holds your inference profile
 pnpm dev
 ```
 
-Then open the **Settings** modal in the UI and set `bedrock_model_id` to your
-inference-profile ARN (or a foundation-model id). It ships empty so the app
-stays usable without AWS, and the **Generate explanation** button no-ops
-cleanly until both creds and a model id are present.
+Then open **Settings → LLMs**, edit the `bedrock-default` LLM (or create a
+custom one), and set `model_id` to your inference-profile ARN or a
+foundation-model id. The app ships with an empty `model_id` so it stays
+usable without AWS, and the **Generate explanation** button no-ops cleanly
+until both creds and a model id are present.
+
+**OpenAI-compatible:** auth is the `api_key` field on the LLM config. For
+hosted providers (Together.ai, OpenAI, Groq, OpenRouter), set it to your API
+key. For local servers (llama.cpp, Ollama's OpenAI shim), leave it empty —
+those don't require auth.
+
+**Ollama native:** no auth. Just set `base_url` (default
+`http://localhost:11434`) and `model` (as `ollama list` shows it).
+
+### v2 → v3 migration
+
+If you're upgrading from a pre-multi-LLM install (schema v2), the migration
+is automatic and non-destructive:
+
+- `bedrock_model_id` and `bedrock_region` settings are moved into the
+  `bedrock-default` LLM row, and `active_llm_id` is set to `bedrock-default`
+  so your existing setup keeps working without a Settings visit.
+- The old `bedrock_model_id` / `bedrock_region` settings keys are deleted.
+- Existing explanations in `option_details` are preserved. They show the raw
+  model id (e.g. `anthropic.claude-3-opus`) instead of an LLM name, since
+  they pre-date the `explanation_llm_id` column.
+- The `llms` table is created and seeded with the three defaults above.
+- `option_details.explanation_llm_id` is added via `ALTER TABLE` (existing
+  rows get `NULL`).
 
 ## App Generation
 

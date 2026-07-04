@@ -1,5 +1,7 @@
 import type {
   ApiEnvelope,
+  Llm,
+  LlmProviderType,
   Meta,
   Option,
   OptionDetail,
@@ -71,10 +73,15 @@ export const api = {
       "POST",
     ),
   explain: (sourceId: string, id: string) =>
-    send<{ explanation: { text: string; model: string; fetched_at: number } }>(
-      `/api/sources/${enc(sourceId)}/options/${enc(id)}/explain`,
-      "POST",
-    ),
+    send<{
+      explanation: {
+        text: string;
+        model: string;
+        llm_id: string | null;
+        llm_name: string | null;
+        fetched_at: number;
+      };
+    }>(`/api/sources/${enc(sourceId)}/options/${enc(id)}/explain`, "POST"),
   getSettings: () => getJson<{ settings: Settings; defaults: Settings }>("/api/settings"),
   updateSettings: (patch: Partial<Settings>) =>
     send<{ settings: Settings; defaults: Settings }>("/api/settings", "PUT", patch),
@@ -87,4 +94,19 @@ export const api = {
     send<{ source: Source }>(`/api/sources/${enc(id)}`, "PUT", patch),
   deleteSource: (id: string) =>
     send<{ ok: boolean }>(`/api/sources/${enc(id)}`, "DELETE"),
+  // ─── LLMs ──────────────────────────────────────────────────────────────
+  listLlms: () => getJson<{ llms: Llm[] }>("/api/llms"),
+  createLlm: (l: Omit<Llm, "is_default">) =>
+    send<{ llm: Llm }>("/api/llms", "POST", l),
+  updateLlm: (id: string, patch: Partial<Omit<Llm, "id" | "is_default">>) =>
+    send<{ llm: Llm }>(`/api/llms/${enc(id)}`, "PUT", patch),
+  deleteLlm: (id: string) =>
+    send<{ ok: boolean }>(`/api/llms/${enc(id)}`, "DELETE"),
+};
+
+export type LlmDraft = {
+  id: string;
+  name: string;
+  provider: LlmProviderType;
+  config: Record<string, unknown>;
 };

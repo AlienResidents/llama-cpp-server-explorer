@@ -7,6 +7,7 @@ import { SettingsModal } from "./components/Settings";
 import { Toast, formatAge, type ToastSpec } from "./components/Toast";
 import type {
   CacheStatus,
+  Llm,
   Meta,
   Option,
   OptionDetail,
@@ -158,8 +159,8 @@ export default function App() {
   }, [activeSourceId, activeId, showCacheToast, showErrorToast]);
 
   const onSettingsSaved = useCallback(
-    (s: Settings, updatedSources?: Source[]) => {
-      setMeta((m) => (m ? { ...m, settings: s, sources: updatedSources ?? m.sources } : m));
+    (s: Settings, updatedSources?: Source[], updatedLlms?: Llm[]) => {
+      setMeta((m) => (m ? { ...m, settings: s, sources: updatedSources ?? m.sources, llms: updatedLlms ?? m.llms } : m));
       if (updatedSources) setSources(updatedSources);
       toastDurationRef.current = s.toast_duration_ms;
       // If the active source was deleted, switch to the new active source.
@@ -170,6 +171,21 @@ export default function App() {
     },
     [activeSourceId, switchSource],
   );
+
+  // Re-fetch /api/meta to pick up changes persisted by the Sources/LLMs tabs
+  // (which save immediately via their own API calls, bypassing the General
+  // tab's Save). Called on Settings modal close so the Generate button's
+  // availability and the source/LLM lists stay current.
+  const refreshMeta = useCallback(async () => {
+    try {
+      const m = await api.meta();
+      setMeta(m);
+      setSources(m.sources);
+      toastDurationRef.current = m.settings.toast_duration_ms;
+    } catch {
+      // Ignore — the next boot or Settings open will retry.
+    }
+  }, []);
 
   const activeSource = sources.find((s) => s.id === activeSourceId) ?? null;
 
@@ -223,7 +239,7 @@ export default function App() {
             <OptionDetailView
               detail={detail}
               sourceId={activeSourceId!}
-              bedrockAvailable={meta?.bedrock_available ?? false}
+              llmAvailability={meta?.llm_availability ?? { status: "no-active-llm" }}
               onRefresh={refreshActive}
               onExplained={(d) => {
                 setDetail(d);
@@ -237,7 +253,8 @@ export default function App() {
                 <p style={{ fontSize: 13, marginTop: 24 }}>
                   Each option pulls the README description, the matching source-code definition
                   (when available), and recent GitHub issues/PRs that mention the flag.
-                  Optionally, a plain-English explanation is generated on demand via Bedrock.
+                  Optionally, a plain-English explanation is generated on demand via the
+                  configured LLM.
                 </p>
                 {sources.length > 1 && (
                   <p style={{ fontSize: 13, marginTop: 16, color: "var(--fg-muted)" }}>
@@ -257,7 +274,11 @@ export default function App() {
           initialSettings={meta.settings}
           defaults={meta.defaults}
           sources={sources}
-          onClose={() => setShowSettings(false)}
+          llms={meta.llms}
+          onClose={() => {
+            setShowSettings(false);
+            void refreshMeta();
+          }}
           onSaved={onSettingsSaved}
         />
       )}

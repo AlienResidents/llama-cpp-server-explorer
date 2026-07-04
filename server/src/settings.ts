@@ -1,6 +1,8 @@
 // Settings — global app-level knobs. Source-specific fields (readme_url,
-// arg_cpp_url, github_repo) moved to the `sources` table; this file now only
-// holds settings that aren't tied to a particular source.
+// arg_cpp_url, github_repo) live in the `sources` table; LLM-specific fields
+// (model_id, region, base_url, api_key, model) live in the `llms` table.
+// This file holds only settings that aren't tied to a particular source or
+// LLM.
 
 import { db } from "./db.js";
 
@@ -12,8 +14,11 @@ export type SettingsShape = {
   enable_llm_explanation: boolean;
   enable_source_code_lookup: boolean;
   enable_issue_lookup: boolean;
-  bedrock_model_id: string;
-  bedrock_region: string;
+  // ID of the LLM used for explanations. Empty = no active LLM (Generate
+  // button disabled). Points at a row in the llms table; CRUD lives in
+  // llms.ts. LLM-specific config (model id, region, base URL, api key, etc.)
+  // is stored on the llms row itself, not here.
+  active_llm_id: string;
 };
 
 export const DEFAULT_SETTINGS: SettingsShape = {
@@ -24,11 +29,10 @@ export const DEFAULT_SETTINGS: SettingsShape = {
   enable_llm_explanation: true,
   enable_source_code_lookup: true,
   enable_issue_lookup: true,
-  // Empty by default — set this in the Settings UI to your Bedrock
-  // inference-profile ARN (or a foundation-model id) before generating
-  // explanations. Leaving it empty disables the LLM path gracefully.
-  bedrock_model_id: "",
-  bedrock_region: "ap-southeast-4",
+  // Empty by default — pick an LLM in Settings → LLMs. The llms.ts seed
+  // populates this during v2→v3 migration if the user had a bedrock_model_id
+  // configured, so existing setups keep working without a Settings visit.
+  active_llm_id: "",
 };
 
 const SETTING_TYPES: Record<keyof SettingsShape, "number" | "string" | "boolean"> = {
@@ -39,8 +43,7 @@ const SETTING_TYPES: Record<keyof SettingsShape, "number" | "string" | "boolean"
   enable_llm_explanation: "boolean",
   enable_source_code_lookup: "boolean",
   enable_issue_lookup: "boolean",
-  bedrock_model_id: "string",
-  bedrock_region: "string",
+  active_llm_id: "string",
 };
 
 function coerce<K extends keyof SettingsShape>(key: K, raw: string): SettingsShape[K] {

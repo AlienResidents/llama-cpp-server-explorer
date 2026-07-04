@@ -1,24 +1,38 @@
 import { useState } from "react";
-import type { OptionDetail } from "../types";
+import type { LlmAvailability, OptionDetail } from "../types";
 import { api } from "../api";
 import { formatAge } from "./Toast";
 
 export function OptionDetailView({
   detail,
   sourceId,
-  bedrockAvailable,
+  llmAvailability,
   onRefresh,
   onExplained,
 }: {
   detail: OptionDetail;
   sourceId: string;
-  bedrockAvailable: boolean;
+  llmAvailability: LlmAvailability;
   onRefresh: () => void;
   onExplained: (newDetail: OptionDetail) => void;
 }) {
   const { option, source, issues, explanation } = detail;
   const [explaining, setExplaining] = useState(false);
   const [explainErr, setExplainErr] = useState<string | null>(null);
+
+  const canExplain = llmAvailability.status === "ready";
+  const llmName =
+    llmAvailability.status === "ready" ||
+    llmAvailability.status === "not-configured" ||
+    llmAvailability.status === "missing-credentials"
+      ? llmAvailability.llm.name
+      : null;
+  const hint =
+    llmAvailability.status === "not-configured" || llmAvailability.status === "missing-credentials"
+      ? llmAvailability.hint
+      : llmAvailability.status === "no-active-llm"
+        ? "No active LLM — pick one in Settings → LLMs."
+        : "";
 
   async function handleExplain() {
     setExplaining(true);
@@ -30,6 +44,8 @@ export function OptionDetailView({
         explanation: {
           text: res.explanation.text,
           model: res.explanation.model,
+          llm_id: res.explanation.llm_id,
+          llm_name: res.explanation.llm_name,
           fetched_at: res.explanation.fetched_at,
         },
       });
@@ -67,12 +83,12 @@ export function OptionDetailView({
 
       <div className="actions">
         <button onClick={onRefresh}>Refresh source &amp; issues</button>
-        <button onClick={handleExplain} disabled={explaining || !bedrockAvailable}>
+        <button onClick={handleExplain} disabled={explaining || !canExplain}>
           {explaining ? "Generating…" : explanation ? "Regenerate explanation" : "Generate plain-English explanation"}
         </button>
-        {!bedrockAvailable && (
+        {!canExplain && (
           <span style={{ color: "var(--fg-muted)", alignSelf: "center", fontSize: 12 }}>
-            Bedrock unavailable — set AWS creds to enable
+            {hint}
           </span>
         )}
       </div>
@@ -84,7 +100,8 @@ export function OptionDetailView({
         <section>
           <h3>Plain-English explanation
             <span style={{ color: "var(--fg-muted)", fontSize: 11, marginLeft: 8, textTransform: "none" }}>
-              {explanation.model} · {formatAge(explanation.fetched_at ? Date.now() - explanation.fetched_at : null)}
+              {explanation.llm_name ?? explanation.model ?? "unknown model"}
+              {explanation.fetched_at ? ` · ${formatAge(Date.now() - explanation.fetched_at)}` : ""}
             </span>
           </h3>
           <div className="explanation">{explanation.text}</div>
