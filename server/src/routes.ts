@@ -512,6 +512,8 @@ api.post("/sources/:sourceId/options/:id/explain", async (c) => {
     defaultValue: opt.defaultValue,
     envVar: opt.envVar,
     sourceBlock: detail?.sourceBlock ?? null,
+    sourceName: source.name,
+    sourceRepo: source.github_repo,
   });
 
   if (!result.ok) {

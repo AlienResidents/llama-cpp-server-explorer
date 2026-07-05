@@ -85,6 +85,15 @@ export type ExplainInput = {
   defaultValue: string | null;
   envVar: string | null;
   sourceBlock: string | null;
+  // Name of the tool the flag belongs to (e.g. "llama-bench", "llama.cpp server").
+  // Critical because the same flag can mean different things across tools —
+  // e.g. `-p` is `--port` on llama-server but `--n-prompt` on llama-bench.
+  // Passed into the prompt so the LLM states behavior for the right tool
+  // directly instead of hedging about which tool it's explaining.
+  sourceName: string;
+  // GitHub repo for the tool (e.g. "ggml-org/llama.cpp"). Gives the LLM
+  // project context to disambiguate.
+  sourceRepo: string;
 };
 
 export type ExplainOk = {

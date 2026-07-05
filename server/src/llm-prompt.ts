@@ -10,7 +10,7 @@ export function buildPrompt(input: ExplainInput): string {
     ? `\nC++ definition (from common/arg.cpp):\n\`\`\`cpp\n${truncate(input.sourceBlock, 1500)}\n\`\`\`\n`
     : "";
   return [
-    "You are explaining a single command-line option of the llama.cpp HTTP server",
+    `You are explaining a single command-line option of ${input.sourceName} (from ${input.sourceRepo})`,
     "to a developer who has read the README terse description but wants the *why*.",
     "",
     `Flag(s): ${flagList}`,
@@ -23,7 +23,10 @@ export function buildPrompt(input: ExplainInput): string {
     "2. **When you'd change it** — concrete scenarios where the default isn't right.",
     "3. **Gotchas** — interactions, performance trade-offs, or footguns.",
     "",
-    "Keep it tight. No hedging. Don't restate the description verbatim. If you don't",
+    "Keep it tight. Don't restate the description verbatim. The flag belongs to",
+    `${input.sourceName} — state its behavior for that tool directly, don't hedge`,
+    "about which tool you're explaining. If the same flag means something different",
+    "in another llama.cpp tool, a one-line note in Gotchas is fine. If you don't",
     "know something with reasonable confidence, say so rather than inventing detail.",
   ]
     .filter(Boolean)
