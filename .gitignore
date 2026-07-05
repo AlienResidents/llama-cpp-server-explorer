@@ -59,3 +59,4 @@ vite.config.js.timestamp-*.mjs
 # Test coverage (when added)
 coverage/
 .nyc_output/
+.agent/

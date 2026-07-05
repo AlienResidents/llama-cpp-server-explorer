@@ -2,7 +2,8 @@
 #
 # Install llama-cpp-server-explorer to a per-platform default location, or to
 # a path passed as the first argument. Downloads a tarball of `main` (no .git),
-# extracts, runs `pnpm install` and `pnpm build`. Re-run to update.
+# syncs it into the install dir (deleting stale files from prior installs),
+# runs `pnpm install` and `pnpm build`. Re-run to update.
 #
 # Usage:
 #   ./install.bash                       # default location
@@ -54,20 +55,40 @@ require curl  "Install via your package manager (apt/brew/pacman/...)."
 require tar   "Standard on macOS and Linux; should already be present."
 require node  "Install Node.js 22.12+ via nvm/fnm/Homebrew/nodejs.org."
 require pnpm  "Install via 'corepack enable && corepack prepare pnpm@latest --activate' or 'npm i -g pnpm'."
+require rsync "Standard on macOS and Linux. If missing: apt install rsync / brew install rsync."
 
-# ─── Fetch + extract ───────────────────────────────────────────────────────
+# ─── Fetch + extract into a staging dir ────────────────────────────────────
+#
+# We extract the tarball into a temp staging dir first, then rsync it into
+# the install dir with --delete. This removes files that were deleted from
+# the repo between releases (a bare tar -xzf only adds/overwrites; it never
+# deletes). We exclude data/ (the SQLite cache), node_modules/ (regenerated
+# by pnpm install), and .git/ (in case the install dir is a dev clone).
 
 mkdir -p "${INSTALL_DIR}"
 TMP_TAR="$(mktemp -t llama-explorer-XXXXXX.tar.gz)"
-trap 'rm -f "${TMP_TAR}"' EXIT
+TMP_STAGE="$(mktemp -d -t llama-explorer-staging-XXXXXX)"
+trap 'rm -f "${TMP_TAR}"; rm -rf "${TMP_STAGE}"' EXIT
 
 echo "==> Downloading ${TARBALL_URL}"
 curl -fsSL --max-time 60 -o "${TMP_TAR}" "${TARBALL_URL}"
 
-echo "==> Extracting into ${INSTALL_DIR}"
-# --strip-components=1 drops the GitHub-injected top-level dir
-# (e.g. llama-cpp-server-explorer-main/).
-tar -xzf "${TMP_TAR}" --strip-components=1 -C "${INSTALL_DIR}"
+echo "==> Extracting into staging dir"
+tar -xzf "${TMP_TAR}" -C "${TMP_STAGE}"
+# Tarball contains a single top-level dir like
+# llama-cpp-server-explorer-main/. Find it.
+STAGED="$(find "${TMP_STAGE}" -mindepth 1 -maxdepth 1 -type d | head -1)"
+if [[ -z "${STAGED}" ]]; then
+  echo "ERROR: tarball did not produce an expected top-level directory." >&2
+  exit 1
+fi
+
+echo "==> Syncing into ${INSTALL_DIR}"
+rsync -a --delete \
+  --exclude='/data' \
+  --exclude='/node_modules' \
+  --exclude='/.git' \
+  "${STAGED}/" "${INSTALL_DIR}/"
 
 # ─── Build ────────────────────────────────────────────────────────────────
 
@@ -89,6 +110,6 @@ Run with:
 
 Then open http://localhost:8787 in your browser.
 
-Re-run this script to update — the install dir is overwritten in place,
+Re-run this script to update — the install dir is synced in place,
 your cache (data/explorer.db) is preserved.
 EOF

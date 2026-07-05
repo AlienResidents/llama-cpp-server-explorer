@@ -40,3 +40,5 @@ jobs:
           test -f dist/client/index.html
           test -d dist/client/assets
           test -f server/dist/index.js
+      - name: Tests
+        run: pnpm test

@@ -9,7 +9,10 @@
     "dev:client": "vite --config client/vite.config.ts",
     "build": "tsc -p server/tsconfig.json && vite build --config client/vite.config.ts",
     "start": "node server/dist/index.js",
-    "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p client/tsconfig.json --noEmit"
+    "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p client/tsconfig.json --noEmit",
+    "test": "vitest run && bash scripts/test-install.bash",
+    "test:unit": "vitest run",
+    "test:install": "bash scripts/test-install.bash"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "3.1068.0",
@@ -31,7 +34,8 @@
     "react-dom": "19.2.7",
     "tsx": "4.22.4",
     "typescript": "6.0.3",
-    "vite": "8.0.16"
+    "vite": "8.0.16",
+    "vitest": "^4.1.9"
   },
   "packageManager": "pnpm@11.5.2",
   "engines": {
