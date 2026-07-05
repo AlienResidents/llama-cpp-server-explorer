@@ -54,7 +54,7 @@ export const openAiProvider: LlmProvider = {
         message: openAiProvider.missingHint(llm),
       };
     }
-    return callOpenAi(llm, "Reply with the single word OK.", 10, timeoutMs);
+    return callOpenAi(llm, "Reply with the single word OK.", 256, timeoutMs);
   },
 };
 
@@ -92,7 +92,7 @@ async function callOpenAi(
       return classifyHttpError(res.status, await safeReadBody(res), "OpenAI-compatible");
     }
     const parsed = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
+      choices?: { message?: { content?: string; reasoning?: string } }[];
       model?: string;
       error?: { message?: string };
     };
@@ -103,8 +103,26 @@ async function callOpenAi(
         message: `Provider returned an error: ${parsed.error.message ?? "unknown"}`,
       };
     }
-    const text = parsed.choices?.[0]?.message?.content?.trim() ?? "";
+    const msg = parsed.choices?.[0]?.message;
+    const text = msg?.content?.trim() ?? "";
     if (!text) {
+      // Log the raw response so the user can see what actually came back.
+      // Together.ai's reasoning models (e.g. zai-org/GLM-5.2) put their
+      // chain-of-thought in `message.reasoning` and the answer in
+      // `message.content`. With a small max_tokens the model spends all
+      // tokens on reasoning and never produces content — the 200 response
+      // looks successful but there's nothing to show.
+      console.warn(`[openai] empty content. reasoning=${!!msg?.reasoning} model=${cfg.model}`);
+      if (msg?.reasoning) {
+        return {
+          ok: false,
+          reason: "empty_response",
+          message:
+            `Provider returned reasoning but no content (model ${cfg.model}). ` +
+            `Reasoning models like GLM-5.2 spend tokens on internal reasoning first; ` +
+            `increase max_tokens or try a non-reasoning model.`,
+        };
+      }
       return { ok: false, reason: "empty_response", message: "Provider returned no text content." };
     }
     // Many providers echo the resolved model id back in the `model` field;

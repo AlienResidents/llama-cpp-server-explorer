@@ -75,7 +75,7 @@ export const bedrockProvider: LlmProvider = {
         message: bedrockProvider.missingHint(llm),
       };
     }
-    return callBedrock(llm, "Reply with the single word OK.", 10, timeoutMs);
+    return callBedrock(llm, "Reply with the single word OK.", 256, timeoutMs);
   },
 };
 

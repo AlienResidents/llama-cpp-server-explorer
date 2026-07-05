@@ -51,7 +51,7 @@ export const ollamaProvider: LlmProvider = {
         message: ollamaProvider.missingHint(llm),
       };
     }
-    return callOllama(llm, "Reply with the single word OK.", 10, timeoutMs);
+    return callOllama(llm, "Reply with the single word OK.", 256, timeoutMs);
   },
 };
 
