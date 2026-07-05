@@ -166,11 +166,11 @@ export function SettingsModal({
         <header>
           <h2>Settings</h2>
           <div className="tabs">
-            <button className={tab === "general" ? "active" : ""} onClick={() => setTab("general")}>General</button>
-            <button className={tab === "sources" ? "active" : ""} onClick={() => setTab("sources")}>Sources ({sources.length})</button>
-            <button className={tab === "llms" ? "active" : ""} onClick={() => setTab("llms")}>LLMs ({llms.length})</button>
+            <button type="button" className={tab === "general" ? "active" : ""} onClick={() => setTab("general")}>General</button>
+            <button type="button" className={tab === "sources" ? "active" : ""} onClick={() => setTab("sources")}>Sources ({sources.length})</button>
+            <button type="button" className={tab === "llms" ? "active" : ""} onClick={() => setTab("llms")}>LLMs ({llms.length})</button>
           </div>
-          <button onClick={onClose} aria-label="Close" className="close">×</button>
+          <button type="button" onClick={onClose} aria-label="Close" className="close">×</button>
         </header>
         <div className="body">
           {tab === "general" && (
@@ -214,10 +214,10 @@ export function SettingsModal({
         <footer>
           {tab === "general" && (
             <>
-              <button className="danger" onClick={reset} disabled={saving}>Reset to defaults</button>
+              <button type="button" className="danger" onClick={reset} disabled={saving}>Reset to defaults</button>
               <div style={{ flex: 1 }} />
-              <button onClick={onClose} disabled={saving}>Cancel</button>
-              <button className="primary" onClick={saveSettings} disabled={saving || !hasChanges}>
+              <button type="button" onClick={onClose} disabled={saving}>Cancel</button>
+              <button type="button" className="primary" onClick={saveSettings} disabled={saving || !hasChanges}>
                 {saving ? "Saving…" : hasChanges ? `Save (${changedKeys.length})` : "No changes"}
               </button>
             </>
@@ -225,7 +225,7 @@ export function SettingsModal({
           {(tab === "sources" || tab === "llms") && (
             <>
               <div style={{ flex: 1 }} />
-              <button onClick={onClose}>Close</button>
+              <button type="button" onClick={onClose}>Close</button>
             </>
           )}
         </footer>
@@ -378,9 +378,9 @@ function SourcesPanel({
                   <div className="source-url"><code>{s.readme_url}</code></div>
                 </div>
                 <div className="source-actions">
-                  <button onClick={() => setEditId(s.id)}>Edit</button>
+                  <button type="button" onClick={() => setEditId(s.id)}>Edit</button>
                   {!s.is_default && (
-                    <button className="danger" onClick={() => void handleDelete(s.id)}>Delete</button>
+                    <button type="button" className="danger" onClick={() => void handleDelete(s.id)}>Delete</button>
                   )}
                 </div>
               </>
@@ -408,7 +408,7 @@ function SourcesPanel({
             }}
           />
         ) : (
-          <button onClick={() => { setError(null); setAdding(true); }}>+ Add custom source</button>
+          <button type="button" onClick={() => { setError(null); setAdding(true); }}>+ Add custom source</button>
         )}
       </div>
     </div>
@@ -511,8 +511,8 @@ function SourceForm({
         />
       </div>
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-        <button onClick={onCancel}>Cancel</button>
-        <button
+        <button type="button" onClick={onCancel}>Cancel</button>
+        <button type="button"
           className="primary"
           onClick={() => void onSubmit(draft)}
         >
@@ -642,22 +642,22 @@ function LlmsPanel({
                 </div>
                 <div className="source-actions">
                   {l.id !== activeLlmId && (
-                    <button
+                    <button type="button"
                       className="primary"
                       onClick={() => void handleSetActive(l.id)}
                     >
                       Set active
                     </button>
                   )}
-                  <button
+                  <button type="button"
                     onClick={() => void handleTest(l.id)}
                     disabled={testingId === l.id}
                   >
                     {testingId === l.id ? "Testing…" : "Test"}
                   </button>
-                  <button onClick={() => setEditId(l.id)}>Edit</button>
+                  <button type="button" onClick={() => setEditId(l.id)}>Edit</button>
                   {!l.is_default && (
-                    <button className="danger" onClick={() => void handleDelete(l.id)}>Delete</button>
+                    <button type="button" className="danger" onClick={() => void handleDelete(l.id)}>Delete</button>
                   )}
                 </div>
                 {testResults[l.id] && (
@@ -693,7 +693,7 @@ function LlmsPanel({
             }}
           />
         ) : (
-          <button onClick={() => { setError(null); setAdding(true); }}>+ Add custom LLM</button>
+          <button type="button" onClick={() => { setError(null); setAdding(true); }}>+ Add custom LLM</button>
         )}
       </div>
     </div>
@@ -824,8 +824,8 @@ function LlmForm({
       )}
 
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-        <button onClick={onCancel}>Cancel</button>
-        <button className="primary" onClick={() => void onSubmit(draft)}>
+        <button type="button" onClick={onCancel}>Cancel</button>
+        <button type="button" className="primary" onClick={() => void onSubmit(draft)}>
           {isEdit ? "Save" : "Add"}
         </button>
       </div>
@@ -899,6 +899,8 @@ function OpenAiConfigFields({
         <label>api key</label>
         <input
           type="password"
+          autoComplete="off"
+          data-1p-ignore
           value={config.api_key}
           onChange={(e) => updateConfig({ api_key: e.target.value } as Partial<LlmConfig>)}
         />

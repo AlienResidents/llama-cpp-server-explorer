@@ -217,7 +217,7 @@ export default function App() {
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
-        <button onClick={() => setShowSettings(true)}>⚙ Settings</button>
+        <button type="button" onClick={() => setShowSettings(true)}>⚙ Settings</button>
       </header>
 
       {bootError ? (

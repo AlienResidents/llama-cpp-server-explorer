@@ -82,8 +82,8 @@ export function OptionDetailView({
       </section>
 
       <div className="actions">
-        <button onClick={onRefresh}>Refresh source &amp; issues</button>
-        <button onClick={handleExplain} disabled={explaining || !canExplain}>
+        <button type="button" onClick={onRefresh}>Refresh source &amp; issues</button>
+        <button type="button" onClick={handleExplain} disabled={explaining || !canExplain}>
           {explaining ? "Generating…" : explanation ? "Regenerate explanation" : "Generate plain-English explanation"}
         </button>
         {!canExplain && (
