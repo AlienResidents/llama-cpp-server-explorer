@@ -662,11 +662,7 @@ function LlmsPanel({
                 </div>
                 {testResults[l.id] && (
                   <div
-                    style={{
-                      fontSize: 12,
-                      marginTop: 6,
-                      color: testResults[l.id]!.ok ? "var(--accent)" : "var(--danger)",
-                    }}
+                    className={`source-test-result ${testResults[l.id]!.ok ? "ok" : "fail"}`}
                   >
                     {testResults[l.id]!.ok ? "✓ " : "✗ "}
                     {testResults[l.id]!.message}

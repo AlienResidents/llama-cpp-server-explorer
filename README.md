@@ -26,6 +26,7 @@ Ollama's native `/api/chat`.
   - [Upgrading](#upgrading)
   - [Pre-flight requirements](#pre-flight-requirements)
 - [Run from source (development)](#run-from-source-development)
+  - [Testing](#testing)
 - [Sources](#sources)
 - [LLMs](#llms)
 - [Settings](#settings)
@@ -84,6 +85,8 @@ explanation**. Result is cached so subsequent loads serve instantly:
   OpenAI-compatible (Together.ai / OpenAI / llama.cpp server / vLLM / Groq /
   OpenRouter / Ollama's OpenAI shim), and Ollama native (`/api/chat`).
   Configured via Settings → LLMs; gracefully no-ops if no LLM is active.
+- **Tests:** `vitest` for schema-migration unit tests, `bash` for install-script
+  sync tests, and `@playwright/test` for browser E2E tests of the Settings UI.
 
 ## Cache & validation behaviour
 
@@ -227,6 +230,25 @@ pnpm dev
 - Backend (Hono):  http://localhost:8787 — also serves the built client at `/`
   when `dist/client/` exists (after `pnpm build`)
 - SQLite DB: `data/explorer.db` (gitignored)
+
+### Testing
+
+```bash
+pnpm test           # vitest unit tests + install-script sync test
+pnpm test:unit      # vitest only (schema migration tests)
+pnpm test:install   # bash install-script sync test only
+```
+
+The vitest suite covers the non-destructive v2 → v3 schema migration:
+ fresh installs seed the three default LLMs, upgrades move old
+`bedrock_model_id` / `bedrock_region` settings into the `bedrock-default`
+LLM row, and pre-existing explanations are preserved with `NULL
+explanation_llm_id`. The bash test verifies the install script's
+`rsync --delete` sync removes stale files from prior installs (the bug
+that left `server/src/bedrock.ts` lingering after the multi-LLM refactor).
+
+Playwright is installed for browser E2E tests of the Settings → LLMs UI;
+config and tests are in progress.
 
 ## Sources
 

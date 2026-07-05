@@ -185,7 +185,7 @@ pre code { background: transparent; border: none; padding: 0; }
 /* Sources panel */
 .sources-list { display: flex; flex-direction: column; gap: 10px; }
 .source-row {
-  display: flex; gap: 10px; align-items: flex-start;
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start;
   padding: 12px 14px; background: var(--bg);
   border: 1px solid var(--border); border-radius: 8px;
 }
@@ -209,6 +209,20 @@ pre code { background: transparent; border: none; padding: 0; }
 }
 .source-actions button:hover { background: var(--bg-hover); }
 .source-actions button.danger { color: var(--danger); border-color: var(--danger); }
+.source-test-result {
+  flex: 0 0 100%;
+  font-size: 12px; margin-top: 6px;
+  padding: 6px 10px; border-radius: 5px;
+  overflow-wrap: anywhere;
+}
+.source-test-result.ok {
+  color: var(--accent); background: var(--accent-soft);
+  border: 1px solid var(--accent);
+}
+.source-test-result.fail {
+  color: var(--danger); background: var(--bg-soft);
+  border: 1px solid var(--danger);
+}
 
 .source-form {
   background: var(--bg); border: 1px solid var(--border);
