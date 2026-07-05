@@ -726,16 +726,16 @@ type LlmDraft = {
 function defaultConfigFor(provider: LlmProviderType): LlmConfig {
   switch (provider) {
     case "bedrock":
-      return { model_id: "", region: "ap-southeast-4" };
+      return { model_id: "", region: "ap-southeast-4", max_tokens: 2048 };
     case "openai":
       // Default to a local llama.cpp server — the most common OpenAI-compat
       // target for a local dev tool. User edits to point at together.ai /
       // OpenAI / Groq / etc.
-      return { base_url: "http://localhost:8080/v1", api_key: "", model: "" };
+      return { base_url: "http://localhost:8080/v1", api_key: "", model: "", max_tokens: 2048 };
     case "ollama":
-      return { base_url: "http://localhost:11434", model: "", keep_alive: "5m" };
+      return { base_url: "http://localhost:11434", model: "", keep_alive: "5m", max_tokens: 2048 };
     default:
-      return { base_url: "", api_key: "", model: "" };
+      return { base_url: "", api_key: "", model: "", max_tokens: 2048 };
   }
 }
 
@@ -865,6 +865,7 @@ function BedrockConfigFields({
         />
         <div className="hint">AWS region; must match the inference profile.</div>
       </div>
+      <MaxTokensField config={config} updateConfig={updateConfig} />
     </>
   );
 }
@@ -924,6 +925,7 @@ function OpenAiConfigFields({
           <code> llama3.1:8b</code>.
         </div>
       </div>
+      <MaxTokensField config={config} updateConfig={updateConfig} />
     </>
   );
 }
@@ -973,6 +975,39 @@ function OllamaConfigFields({
           <code>0</code> = unload immediately, <code>-1</code> = keep loaded forever.
         </div>
       </div>
+      <MaxTokensField config={config} updateConfig={updateConfig} />
     </>
+  );
+}
+
+// Shared max_tokens field — all three provider config types now include
+// max_tokens, so this is rendered once per provider config fields component.
+// The hint calls out the reasoning-model gotcha so users know to raise it if
+// they see empty-content errors.
+function MaxTokensField({
+  config,
+  updateConfig,
+}: {
+  config: { max_tokens: number };
+  updateConfig: (patch: Partial<LlmConfig>) => void;
+}) {
+  return (
+    <div className="field">
+      <label>max_tokens</label>
+      <input
+        type="number"
+        min={1}
+        value={config.max_tokens}
+        onChange={(e) =>
+          updateConfig({ max_tokens: parseInt(e.target.value, 10) || 0 } as Partial<LlmConfig>)
+        }
+      />
+      <div className="hint">
+        Cap on response tokens. Reasoning models (e.g. <code>zai-org/GLM-5.2</code>,
+        <code> qwen3</code>, <code>deepseek-r1</code>) spend tokens on internal reasoning first; if
+        you see <code>“returned reasoning but no content”</code>, increase this. Default
+        <code> 2048</code>; try <code>4096</code> for reasoning models.
+      </div>
+    </div>
   );
 }

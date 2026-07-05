@@ -42,7 +42,7 @@ export const openAiProvider: LlmProvider = {
         message: "OpenAI-compatible LLM is missing base_url or model. Set them in Settings → LLMs.",
       };
     }
-    return callOpenAi(llm, buildPrompt(input), 1024, timeoutMs);
+    return callOpenAi(llm, buildPrompt(input), cfg.max_tokens || 2048, timeoutMs);
   },
 
   async testConnection(llm, timeoutMs: number): Promise<ExplainResult> {
@@ -54,7 +54,7 @@ export const openAiProvider: LlmProvider = {
         message: openAiProvider.missingHint(llm),
       };
     }
-    return callOpenAi(llm, "Reply with the single word OK.", 256, timeoutMs);
+    return callOpenAi(llm, "Reply with the single word OK.", cfg.max_tokens || 2048, timeoutMs);
   },
 };
 

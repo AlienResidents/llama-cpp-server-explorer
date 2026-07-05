@@ -51,19 +51,19 @@ const DEFAULT_LLMS: Omit<Llm, "is_default">[] = [
     id: "bedrock-default",
     name: "AWS Bedrock (Claude)",
     provider: "bedrock",
-    config: { model_id: "", region: "ap-southeast-4" },
+    config: { model_id: "", region: "ap-southeast-4", max_tokens: 2048 },
   },
   {
     id: "openai-together",
     name: "Together.ai (OpenAI-compatible)",
     provider: "openai",
-    config: { base_url: "https://api.together.xyz/v1", api_key: "", model: "zai-org/GLM-5.2" },
+    config: { base_url: "https://api.together.xyz/v1", api_key: "", model: "zai-org/GLM-5.2", max_tokens: 2048 },
   },
   {
     id: "ollama-default",
     name: "Ollama (native /api/chat)",
     provider: "ollama",
-    config: { base_url: "http://localhost:11434", model: "", keep_alive: "5m" },
+    config: { base_url: "http://localhost:11434", model: "", keep_alive: "5m", max_tokens: 2048 },
   },
 ];
 

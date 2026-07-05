@@ -56,7 +56,7 @@ export const bedrockProvider: LlmProvider = {
           "No AWS credentials in the environment. Set AWS_PROFILE / AWS_ACCESS_KEY_ID / AWS_ROLE_ARN before starting the server.",
       };
     }
-    return callBedrock(llm, buildPrompt(input), 1024, timeoutMs);
+    return callBedrock(llm, buildPrompt(input), cfg.max_tokens || 2048, timeoutMs);
   },
 
   async testConnection(llm, timeoutMs: number): Promise<ExplainResult> {
@@ -75,7 +75,7 @@ export const bedrockProvider: LlmProvider = {
         message: bedrockProvider.missingHint(llm),
       };
     }
-    return callBedrock(llm, "Reply with the single word OK.", 256, timeoutMs);
+    return callBedrock(llm, "Reply with the single word OK.", cfg.max_tokens || 2048, timeoutMs);
   },
 };
 

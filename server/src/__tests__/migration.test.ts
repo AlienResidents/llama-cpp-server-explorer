@@ -1,10 +1,11 @@
 // Schema migration tests.
 //
-// These tests guard the non-destructive v2→v3 migration path — the one that
-// moves bedrock_model_id / bedrock_region settings into the bedrock-default
-// LLM row, seeds the three default LLMs, sets active_llm_id, and preserves
-// pre-existing explanations. They also cover the fresh-install path (v0→v3)
-// and idempotency (re-running on a v3 DB is a no-op).
+// These tests guard the non-destructive v2→v3 and v3→v4 migration paths —
+// the ones that move bedrock_model_id / bedrock_region settings into the
+// bedrock-default LLM row, seed the three default LLMs, set active_llm_id,
+// preserve pre-existing explanations, and add max_tokens to each LLM's
+// config_json. They also cover the fresh-install path (v0→v4) and idempotency
+// (re-running on a v4 DB is a no-op).
 //
 // Each test creates a temp DB, sets DB_PATH to point at it, then dynamically
 // imports db.ts + llms.ts fresh (via vi.resetModules) to re-trigger the
@@ -192,7 +193,7 @@ afterEach(() => {
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
-describe("fresh install (v0 → v3)", () => {
+describe("fresh install (v0 → v4)", () => {
   it("creates the llms table and seeds 3 default LLMs", async () => {
     const { llms } = await freshInstall();
     const all = llms.listLlms();
@@ -217,18 +218,28 @@ describe("fresh install (v0 → v3)", () => {
     expect(together!.provider).toBe("openai");
     // The config shape is validated by the type system; here we just check
     // the model field is what the README claims.
-    const cfg = together!.config as { model: string };
+    const cfg = together!.config as { model: string; max_tokens: number };
     expect(cfg.model).toBe("zai-org/GLM-5.2");
+    // v4: all seeded LLMs get max_tokens: 2048.
+    expect(cfg.max_tokens).toBe(2048);
   });
 
-  it("sets the schema version to 3", async () => {
+  it("seeds all 3 default LLMs with max_tokens: 2048", async () => {
+    const { llms } = await freshInstall();
+    for (const l of llms.listLlms()) {
+      const cfg = l.config as { max_tokens: number };
+      expect(cfg.max_tokens).toBe(2048);
+    }
+  });
+
+  it("sets the schema version to 4", async () => {
     const { db } = await freshInstall();
     const version = db.pragma("user_version", { simple: true }) as number;
-    expect(version).toBe(3);
+    expect(version).toBe(4);
   });
 });
 
-describe("v2 → v3 migration", () => {
+describe("v2 → v4 migration", () => {
   it("moves bedrock_model_id + bedrock_region into the bedrock-default LLM", async () => {
     const { llms, db } = await migrateFromV2({
       bedrockModelId: "anthropic.claude-3-opus-20240229-v1:0",
@@ -330,12 +341,12 @@ describe("v2 → v3 migration", () => {
     ]);
   });
 
-  it("sets the schema version to 3", async () => {
+  it("sets the schema version to 4", async () => {
     const { db } = await migrateFromV2({
       bedrockModelId: "anthropic.claude-3-opus-20240229-v1:0",
     });
     const version = db.pragma("user_version", { simple: true }) as number;
-    expect(version).toBe(3);
+    expect(version).toBe(4);
   });
 });
 
@@ -363,14 +374,104 @@ describe("idempotency", () => {
     expect(llmsAfter.n).toBe(llmsBefore.n);
     expect(settingsAfter.n).toBe(settingsBefore.n);
 
-    // Schema version is still 3.
+    // Schema version is 4.
     const version = db2.pragma("user_version", { simple: true }) as number;
-    expect(version).toBe(3);
+    expect(version).toBe(4);
 
     // The explanation is still there.
     const row = db2
       .prepare("SELECT explanation FROM option_details WHERE source_id = ? AND option_id = ?")
       .get("server", "threads") as { explanation: string | null };
     expect(row?.explanation).toBe("This is a pre-existing explanation.");
+  });
+});
+
+// ─── v3 → v4 migration ─────────────────────────────────────────────────────
+//
+// v3→v4 adds max_tokens to each LLM's config_json. The llms table schema is
+// unchanged (config is a JSON blob); only the content gains a field. These
+// tests simulate a pre-v4 DB by seeding LLMs with config_json that lacks
+// max_tokens, then re-importing db.ts to run the migration.
+
+describe("v3 → v4 migration", () => {
+  // Helper: creates a v3 DB with 3 LLMs whose config_json has NO max_tokens
+  // field (simulating a pre-v4 install), then re-imports db.ts + llms.ts to
+  // run the v3→v4 migration. Returns the open db handle + llms module.
+  async function migrateFromV3(): Promise<{
+    db: Database.Database;
+    llms: typeof import("../llms.js");
+  }> {
+    // Start from a v2→v4 migration (seeds 3 LLMs with max_tokens).
+    const { db, dbPath } = await migrateFromV2({
+      bedrockModelId: "anthropic.claude-3-opus-20240229-v1:0",
+      bedrockRegion: "us-east-1",
+    });
+
+    // Strip max_tokens from every LLM's config_json to simulate a pre-v4 DB.
+    const rows = db.prepare("SELECT id, config_json FROM llms").all() as Array<{
+      id: string;
+      config_json: string;
+    }>;
+    for (const row of rows) {
+      const cfg = JSON.parse(row.config_json) as Record<string, unknown>;
+      delete cfg.max_tokens;
+      db.prepare("UPDATE llms SET config_json = ? WHERE id = ?").run(
+        JSON.stringify(cfg),
+        row.id,
+      );
+    }
+
+    // Set schema version back to 3 so the v3→v4 step has work to do.
+    db.pragma("user_version = 3");
+    db.close();
+
+    // Re-import to run the migration.
+    process.env.DB_PATH = dbPath;
+    vi.resetModules();
+    const dbMod = await import("../db.js");
+    const llmsMod = await import("../llms.js");
+    return { db: dbMod.db, llms: llmsMod };
+  }
+
+  it("adds max_tokens: 2048 to every LLM config that lacks it", async () => {
+    const { llms } = await migrateFromV3();
+    for (const l of llms.listLlms()) {
+      const cfg = l.config as { max_tokens: number };
+      expect(cfg.max_tokens).toBe(2048);
+    }
+  });
+
+  it("preserves the other config fields (model_id, region, model, etc.)", async () => {
+    const { llms } = await migrateFromV3();
+    const bedrock = llms.getLlm("bedrock-default");
+    expect(bedrock).toBeDefined();
+    const cfg = bedrock!.config as { model_id: string; region: string; max_tokens: number };
+    expect(cfg.model_id).toBe("anthropic.claude-3-opus-20240229-v1:0");
+    expect(cfg.region).toBe("us-east-1");
+    expect(cfg.max_tokens).toBe(2048);
+  });
+
+  it("is idempotent — running twice does not double-add or overwrite", async () => {
+    const { db } = await migrateFromV3();
+    // Capture the config_json after the first migration.
+    const before = db
+      .prepare("SELECT config_json FROM llms WHERE id = ?")
+      .get("openai-together") as { config_json: string };
+    db.close();
+
+    // Re-import a second time.
+    vi.resetModules();
+    const dbMod2 = await import("../db.js");
+    const llmsMod2 = await import("../llms.js");
+    const db2 = dbMod2.db;
+    const after = db2
+      .prepare("SELECT config_json FROM llms WHERE id = ?")
+      .get("openai-together") as { config_json: string };
+    expect(after.config_json).toBe(before.config_json);
+
+    // The LLM still has max_tokens: 2048.
+    const together = llmsMod2.getLlm("openai-together");
+    const cfg = together!.config as { max_tokens: number };
+    expect(cfg.max_tokens).toBe(2048);
   });
 });

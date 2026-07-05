@@ -14,6 +14,10 @@ export type BedrockConfig = {
   // or an inference-profile ARN (e.g. "arn:aws:bedrock:ap-southeast-4:...:inference-profile/...").
   model_id: string;
   region: string;
+  // Cap on response tokens. Reasoning models (e.g. Claude with extended
+  // thinking) burn tokens on internal reasoning first; raise this if you see
+  // empty-content errors. Default 2048.
+  max_tokens: number;
 };
 
 export type OpenAiConfig = {
@@ -38,6 +42,13 @@ export type OpenAiConfig = {
   //   llama.cpp:     whatever you passed to --alias or the model filename
   //   Ollama shim:   "llama3.1:8b"
   model: string;
+  // Cap on response tokens sent as `max_tokens` in the request body.
+  // Reasoning models (e.g. zai-org/GLM-5.2) put chain-of-thought in a
+  // separate `reasoning` field and spend tokens on it first; if max_tokens
+  // is too small the model never produces `content` and you get an
+  // empty-content error. Default 2048; raise to 4096+ for reasoning models
+  // if needed.
+  max_tokens: number;
 };
 
 export type OllamaConfig = {
@@ -49,6 +60,11 @@ export type OllamaConfig = {
   // the request. Default "5m". Set to "0" to unload immediately, or "-1"
   // to keep loaded forever.
   keep_alive: string;
+  // Cap on response tokens, sent as `options.num_predict` in the /api/chat
+  // body. Reasoning models (qwen3, deepseek-r1) emit <think> blocks that
+  // consume tokens before the answer; raise this if you see empty-content
+  // errors. Default 2048.
+  max_tokens: number;
 };
 
 export type LlmConfig = BedrockConfig | OpenAiConfig | OllamaConfig;

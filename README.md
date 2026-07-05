@@ -287,15 +287,22 @@ The app ships with three preset LLMs, one per supported provider:
 
 - **`bedrock`** — Anthropic Claude via the AWS SDK. Auth comes from the
   environment (`AWS_PROFILE` / `AWS_ACCESS_KEY_ID` / `AWS_ROLE_ARN`). Config:
-  `model_id` (foundation-model id or inference-profile ARN) + `region`.
+  `model_id` (foundation-model id or inference-profile ARN) + `region` +
+  `max_tokens`.
 - **`openai`** — Any endpoint that speaks the OpenAI Chat Completions API
   (`POST {base_url}/chat/completions`). Covers Together.ai, OpenAI, Groq,
   OpenRouter, vLLM, and local servers like llama.cpp's `--server` and Ollama's
   OpenAI-compat shim. Config: `base_url` + `api_key` (empty for no-auth local
-  servers) + `model`.
+  servers) + `model` + `max_tokens`.
 - **`ollama`** — Ollama's native `/api/chat` endpoint. Exposes `keep_alive`
   (how long the model stays loaded), which the OpenAI shim doesn't. Config:
-  `base_url` + `model` + `keep_alive`.
+  `base_url` + `model` + `keep_alive` + `max_tokens` (sent as
+  `options.num_predict`).
+
+`max_tokens` caps the response length and is configurable per LLM. Default
+`2048`. Reasoning models (e.g. `zai-org/GLM-5.2`, `qwen3`, `deepseek-r1`)
+spend tokens on internal reasoning first; if you see `"returned reasoning
+but no content"`, increase `max_tokens` (try `4096`).
 
 **Switch active LLM** in Settings → LLMs via the **Set active** button. The
 active LLM shows an `active` badge. The Generate button is disabled until the
@@ -402,6 +409,19 @@ is automatic and non-destructive:
 - The `llms` table is created and seeded with the three defaults above.
 - `option_details.explanation_llm_id` is added via `ALTER TABLE` (existing
   rows get `NULL`).
+
+### v3 → v4 migration
+
+If you're upgrading from a v3 install (multi-LLM already, but no `max_tokens`
+on LLM configs), the migration is automatic and non-destructive:
+
+- Each LLM's `config_json` gains a `max_tokens: 2048` field if it doesn't
+  already have one. The `llms` table schema is unchanged (config is a JSON
+  blob); only the content gains a field.
+- No other data is touched — LLM configs, `option_details`, and settings are
+  all preserved as-is.
+- Idempotent: re-running on a v4 DB is a no-op (rows that already have
+  `max_tokens` are skipped).
 
 ## App Generation
 

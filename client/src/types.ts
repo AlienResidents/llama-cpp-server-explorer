@@ -25,18 +25,21 @@ export type LlmProviderType = "bedrock" | "openai" | "ollama";
 export type BedrockConfig = {
   model_id: string;
   region: string;
+  max_tokens: number;
 };
 
 export type OpenAiConfig = {
   base_url: string;
   api_key: string;
   model: string;
+  max_tokens: number;
 };
 
 export type OllamaConfig = {
   base_url: string;
   model: string;
   keep_alive: string;
+  max_tokens: number;
 };
 
 export type LlmConfig = BedrockConfig | OpenAiConfig | OllamaConfig;

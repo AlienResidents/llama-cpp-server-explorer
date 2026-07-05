@@ -29,8 +29,14 @@ db.pragma("foreign_keys = ON");
 // (existing rows get NULL, which the UI treats as "pre-multi-LLM"). The
 // data migration of old `bedrock_model_id` / `bedrock_region` settings into a
 // seeded default Bedrock LLM row is handled by `llms.ts` on first load.
+//
+// v3 → v4 adds `max_tokens` to each LLM's config_json. The `llms` table
+// schema itself is unchanged (config is a JSON blob), but existing configs
+// don't have the field. The migration iterates all llms rows, parses
+// config_json, adds max_tokens: 2048 if missing, writes back. Idempotent —
+// rows that already have max_tokens are skipped.
 
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 4;
 
 const onDiskVersion = (db.pragma("user_version", { simple: true }) as number) ?? 0;
 
@@ -137,6 +143,35 @@ const hasLlmIdCol = optionDetailsCols.some((c) => c.name === "explanation_llm_id
 if (!hasLlmIdCol) {
   console.log(`[db] migrating v2 → v3: adding option_details.explanation_llm_id`);
   db.exec(`ALTER TABLE option_details ADD COLUMN explanation_llm_id TEXT`);
+}
+
+// v3 → v4: add max_tokens to each LLM's config_json. The llms table schema
+// doesn't change (config is a JSON blob); only the content of config_json
+// gains a field. Iterates all rows, parses config_json, adds max_tokens: 2048
+// if missing, writes back. Idempotent — rows that already have max_tokens are
+// skipped, so re-importing or running twice is a no-op. On a fresh install
+// the llms table is empty (seeded by llms.ts with max_tokens already set) so
+// this loop does nothing.
+const llmsRows = db.prepare("SELECT id, config_json FROM llms").all() as Array<{
+  id: string;
+  config_json: string;
+}>;
+let migratedCount = 0;
+for (const row of llmsRows) {
+  const cfg = JSON.parse(row.config_json) as Record<string, unknown>;
+  if (cfg.max_tokens === undefined) {
+    cfg.max_tokens = 2048;
+    db.prepare("UPDATE llms SET config_json = ? WHERE id = ?").run(
+      JSON.stringify(cfg),
+      row.id,
+    );
+    migratedCount++;
+  }
+}
+if (migratedCount > 0) {
+  console.log(
+    `[db] migrating v3 → v4: added max_tokens to ${migratedCount} LLM config(s)`,
+  );
 }
 
 db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`);

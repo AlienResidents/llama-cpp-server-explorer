@@ -39,7 +39,7 @@ export const ollamaProvider: LlmProvider = {
         message: "Ollama LLM is missing base_url or model. Set them in Settings → LLMs.",
       };
     }
-    return callOllama(llm, buildPrompt(input), 1024, timeoutMs);
+    return callOllama(llm, buildPrompt(input), cfg.max_tokens || 2048, timeoutMs);
   },
 
   async testConnection(llm, timeoutMs: number): Promise<ExplainResult> {
@@ -51,7 +51,7 @@ export const ollamaProvider: LlmProvider = {
         message: ollamaProvider.missingHint(llm),
       };
     }
-    return callOllama(llm, "Reply with the single word OK.", 256, timeoutMs);
+    return callOllama(llm, "Reply with the single word OK.", cfg.max_tokens || 2048, timeoutMs);
   },
 };
 
@@ -70,7 +70,7 @@ async function callOllama(
     model: cfg.model,
     messages: [{ role: "user", content: prompt }],
     stream: false,
-    options: { temperature: 0.3 },
+    options: { temperature: 0.3, num_predict: maxTokens },
     keep_alive: cfg.keep_alive || "5m",
   };
 
