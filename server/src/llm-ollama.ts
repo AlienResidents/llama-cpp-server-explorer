@@ -7,7 +7,7 @@
 // an AbortError which we map to provider_timeout.
 
 import type { ExplainInput, ExplainResult, Llm, LlmProvider, OllamaConfig } from "./llm-types.js";
-import { buildPrompt } from "./llm-prompt.js";
+import { buildPrompt, parseExplainResponse } from "./llm-prompt.js";
 
 export const ollamaProvider: LlmProvider = {
   isConfigured(llm) {
@@ -39,7 +39,9 @@ export const ollamaProvider: LlmProvider = {
         message: "Ollama LLM is missing base_url or model. Set them in Settings → LLMs.",
       };
     }
-    return callOllama(llm, buildPrompt(input), cfg.max_tokens || 2048, timeoutMs);
+    const raw = await callOllama(llm, buildPrompt(input), cfg.max_tokens || 2048, timeoutMs);
+    if (!raw.ok) return raw;
+    return parseExplainResponse(raw);
   },
 
   async testConnection(llm, timeoutMs: number): Promise<ExplainResult> {

@@ -94,8 +94,30 @@ export type OptionDetail = {
         llm_id: string | null;
         llm_name: string | null;
         fetched_at: number | null;
+        meta: ExplainMeta | null;
       }
     | null;
+};
+
+// Structured per-flag metadata extracted from the LLM's explanation response.
+// Mirrors the server's ExplainMeta type (server/src/llm-types.ts). Rendered
+// as chips + callouts alongside the markdown body in OptionDetail.
+export type ExplainMeta = {
+  hardware_impact?: HardwareImpact[];
+  synergy_notes?: SynergyNote[];
+};
+
+export type HardwareImpact = {
+  // Canonical resource: VRAM | RAM | COMPUTE | CPU | DISK | NETWORK.
+  type: string;
+  // Canonical effect: REDUCTION | INCREASE | EXPANSION | ALTERATION.
+  effect: string;
+};
+
+export type SynergyNote = {
+  severity: "info" | "warning";
+  title: string;
+  detail: string;
 };
 
 export type Settings = {

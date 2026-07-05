@@ -30,13 +30,23 @@ db.pragma("foreign_keys = ON");
 // data migration of old `bedrock_model_id` / `bedrock_region` settings into a
 // seeded default Bedrock LLM row is handled by `llms.ts` on first load.
 //
+// v3 → v4 adds `max_tokens` to each LLM's config_json (see llms.ts + the
+// v3→v4 block below). The `llms` table schema is unchanged (config is a JSON
+// blob); only the content gains a field.
+//
+// v4 → v5 adds `explanation_meta_json` to `option_details` for structured
+// per-flag metadata (hardware impact chips + static synergy notes) extracted
+// from the LLM's JSON response. Existing explanation rows get NULL meta —
+// the UI renders them as today (markdown only, no chips). Re-generating an
+// explanation populates the new column. Additive, non-destructive.
+//
 // v3 → v4 adds `max_tokens` to each LLM's config_json. The `llms` table
 // schema itself is unchanged (config is a JSON blob), but existing configs
 // don't have the field. The migration iterates all llms rows, parses
 // config_json, adds max_tokens: 2048 if missing, writes back. Idempotent —
 // rows that already have max_tokens are skipped.
 
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 5;
 
 const onDiskVersion = (db.pragma("user_version", { simple: true }) as number) ?? 0;
 
@@ -113,6 +123,7 @@ db.exec(`
     explanation_model TEXT,
     explanation_fetched_at INTEGER,
     explanation_llm_id TEXT,
+    explanation_meta_json TEXT,
     PRIMARY KEY (source_id, option_id),
     FOREIGN KEY (source_id, option_id)
       REFERENCES options(source_id, id) ON DELETE CASCADE
@@ -172,6 +183,18 @@ if (migratedCount > 0) {
   console.log(
     `[db] migrating v3 → v4: added max_tokens to ${migratedCount} LLM config(s)`,
   );
+}
+
+// v4 → v5: add explanation_meta_json to option_details for structured
+// per-flag metadata (hardware impact chips + static synergy notes). Additive
+// — existing rows get NULL, the UI renders them as today (markdown only).
+// Gated on the column not existing yet so it's idempotent; on a fresh install
+// the CREATE TABLE below already includes the column so this ALTER is a
+// no-op.
+const hasMetaCol = optionDetailsCols.some((c) => c.name === "explanation_meta_json");
+if (!hasMetaCol) {
+  console.log(`[db] migrating v4 → v5: adding option_details.explanation_meta_json`);
+  db.exec(`ALTER TABLE option_details ADD COLUMN explanation_meta_json TEXT`);
 }
 
 db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`);

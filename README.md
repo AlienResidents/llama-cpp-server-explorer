@@ -29,10 +29,13 @@ Ollama's native `/api/chat`.
   - [Testing](#testing)
 - [Sources](#sources)
 - [LLMs](#llms)
+  - [Structured output: hardware impact chips + synergy notes](#structured-output-hardware-impact-chips--synergy-notes)
 - [Settings](#settings)
 - [API](#api)
 - [LLM auth](#llm-auth)
   - [v2 → v3 migration](#v2--v3-migration)
+  - [v3 → v4 migration](#v3--v4-migration)
+  - [v4 → v5 migration](#v4--v5-migration)
 - [App Generation](#app-generation)
   - [Initial prompt](#initial-prompt)
   - [Clarifying Q&A](#clarifying-qa)
@@ -45,8 +48,11 @@ Ollama's native `/api/chat`.
 Clicking an option opens its detail panel: README description, defaults, env
 var, the matching C++ definition (with a link back to the exact line range
 on GitHub), and — if you've generated one — a plain-English breakdown of
-what the flag does, when you'd change it, and the gotchas. The list on the
-left stays available for navigation; selection is highlighted.
+what the flag does, when you'd change it, and the gotchas. Above the
+explanation text, **hardware impact chips** give at-a-glance scannability
+(e.g. `📉 VRAM · REDUCTION`). Below it, **synergy notes** flag cross-flag
+considerations (e.g. `💡 Pairs with --ngl`). The list on the left stays
+available for navigation; selection is highlighted.
 
 ![Option detail showing --swa-full with a generated plain-English explanation](images/option-detail-swa-full.png)
 
@@ -304,6 +310,44 @@ The app ships with three preset LLMs, one per supported provider:
 spend tokens on internal reasoning first; if you see `"returned reasoning
 but no content"`, increase `max_tokens` (try `4096`).
 
+### Structured output: hardware impact chips + synergy notes
+
+When the LLM generates an explanation, the prompt asks it for a JSON object
+with three fields: the markdown body (`explanation`), an array of hardware
+impact chips (`hardware_impact`), and an array of static cross-flag notes
+(`synergy_notes`). The server parses the JSON, normalizes the enum values,
+stores the markdown in `option_details.explanation` (as before) and the
+structured metadata in a new `explanation_meta_json` column.
+
+**Hardware impact chips** are colored badges shown above the explanation
+text. Each chip has a resource type and an effect direction:
+
+| Type       | Effect       | Example flag        |
+| ---------- | ------------ | ------------------- |
+| `VRAM`     | `REDUCTION`  | `--flash-attn`      |
+| `VRAM`     | `EXPANSION`  | `--ctx-size`        |
+| `COMPUTE`  | `INCREASE`   | `--batch-size`      |
+| `COMPUTE`  | `ALTERATION` | `--flash-attn`      |
+| `CPU`      | `INCREASE`   | `--threads`         |
+| `RAM`      | `EXPANSION`  | `--mlock`           |
+
+Effects are color-coded: 📉 green (reduction), 📈 red (increase), 📊 amber
+(expansion), 🔄 blue (alteration). Multi-dimensional impacts produce multiple
+chips — e.g. `--flash-attn` returns both `VRAM · REDUCTION` and
+`COMPUTE · ALTERATION`.
+
+**Synergy notes** are callout boxes shown below the explanation text. Each
+note has a severity (`info` 💡 or `warning` ⚠️), a short title, and a detail
+sentence. These are static, per-flag notes that mention other flags the user
+should consider — no selection state required. Example: on the `--threads`
+card, a note might say "Pairs with `--ngl` — if offloading 100% of layers to
+GPU, keep threads matched to physical E-cores to avoid driver contention."
+
+If the LLM returns plain prose instead of JSON (e.g. a small local model that
+ignores the JSON instruction), the parser falls back gracefully: the raw text
+is stored as the explanation with no chips or notes. Re-generating with a
+model that supports JSON output populates them.
+
 **Switch active LLM** in Settings → LLMs via the **Set active** button. The
 active LLM shows an `active` badge. The Generate button is disabled until the
 active LLM is both configured (required fields filled) and has credentials
@@ -422,6 +466,19 @@ on LLM configs), the migration is automatic and non-destructive:
   all preserved as-is.
 - Idempotent: re-running on a v4 DB is a no-op (rows that already have
   `max_tokens` are skipped).
+
+### v4 → v5 migration
+
+If you're upgrading from a v4 install (multi-LLM with `max_tokens`, but no
+structured output metadata), the migration is automatic and non-destructive:
+
+- `option_details.explanation_meta_json` is added via `ALTER TABLE` (existing
+  rows get `NULL`). The column stores the JSON object with `hardware_impact`
+  chips and `synergy_notes` extracted from the LLM's response.
+- Existing explanations are preserved as-is — they render as today (markdown
+  only, no chips or notes). Re-generating an explanation with the new prompt
+  populates the meta column.
+- Idempotent: re-running on a v5 DB is a no-op (the column already exists).
 
 ## App Generation
 

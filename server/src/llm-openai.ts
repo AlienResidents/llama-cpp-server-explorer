@@ -8,7 +8,7 @@
 // an AbortError which we map to provider_timeout.
 
 import type { ExplainInput, ExplainResult, Llm, LlmProvider, OpenAiConfig } from "./llm-types.js";
-import { buildPrompt } from "./llm-prompt.js";
+import { buildPrompt, parseExplainResponse } from "./llm-prompt.js";
 
 export const openAiProvider: LlmProvider = {
   isConfigured(llm) {
@@ -42,7 +42,9 @@ export const openAiProvider: LlmProvider = {
         message: "OpenAI-compatible LLM is missing base_url or model. Set them in Settings → LLMs.",
       };
     }
-    return callOpenAi(llm, buildPrompt(input), cfg.max_tokens || 2048, timeoutMs);
+    const raw = await callOpenAi(llm, buildPrompt(input), cfg.max_tokens || 2048, timeoutMs);
+    if (!raw.ok) return raw;
+    return parseExplainResponse(raw);
   },
 
   async testConnection(llm, timeoutMs: number): Promise<ExplainResult> {

@@ -1,5 +1,6 @@
 import type {
   ApiEnvelope,
+  ExplainMeta,
   Llm,
   LlmProviderType,
   Meta,
@@ -80,6 +81,7 @@ export const api = {
         llm_id: string | null;
         llm_name: string | null;
         fetched_at: number;
+        meta: ExplainMeta | null;
       };
     }>(`/api/sources/${enc(sourceId)}/options/${enc(id)}/explain`, "POST"),
   getSettings: () => getJson<{ settings: Settings; defaults: Settings }>("/api/settings"),

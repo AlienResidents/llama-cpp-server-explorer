@@ -37,7 +37,7 @@ import {
   type Llm,
   type LlmProviderType,
 } from "./llms.js";
-import type { ExplainReason } from "./llm-types.js";
+import type { ExplainMeta, ExplainReason } from "./llm-types.js";
 
 export const api = new Hono();
 
@@ -335,7 +335,8 @@ const getDetail = db.prepare(`
          issues_json as issuesJson, issues_fetched_at as issuesFetchedAt,
          explanation, explanation_model as explanationModel,
          explanation_llm_id as explanationLlmId,
-         explanation_fetched_at as explanationFetchedAt
+         explanation_fetched_at as explanationFetchedAt,
+         explanation_meta_json as explanationMetaJson
   FROM option_details WHERE source_id = ? AND option_id = ?
 `);
 
@@ -358,13 +359,15 @@ const upsertDetailIssues = db.prepare(`
 
 const upsertDetailExplanation = db.prepare(`
   INSERT INTO option_details (source_id, option_id, explanation, explanation_model,
-                               explanation_llm_id, explanation_fetched_at)
-  VALUES (?, ?, ?, ?, ?, ?)
+                               explanation_llm_id, explanation_fetched_at,
+                               explanation_meta_json)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, option_id) DO UPDATE SET
     explanation = excluded.explanation,
     explanation_model = excluded.explanation_model,
     explanation_llm_id = excluded.explanation_llm_id,
-    explanation_fetched_at = excluded.explanation_fetched_at
+    explanation_fetched_at = excluded.explanation_fetched_at,
+    explanation_meta_json = excluded.explanation_meta_json
 `);
 
 type DetailRow = {
@@ -377,6 +380,7 @@ type DetailRow = {
   explanationModel: string | null;
   explanationLlmId: string | null;
   explanationFetchedAt: number | null;
+  explanationMetaJson: string | null;
 };
 
 async function refreshSourceFor(source: Source, opt: { id: string; flags: string[] }): Promise<void> {
@@ -462,6 +466,9 @@ api.get("/sources/:sourceId/options/:id", async (c) => {
             llm_id: detail.explanationLlmId,
             llm_name: llmNameFor(detail.explanationLlmId),
             fetched_at: detail.explanationFetchedAt,
+            meta: detail.explanationMetaJson
+              ? (JSON.parse(detail.explanationMetaJson) as ExplainMeta)
+              : null,
           }
         : null,
     },
@@ -550,6 +557,7 @@ api.post("/sources/:sourceId/options/:id/explain", async (c) => {
     result.model,
     llmId,
     Date.now(),
+    result.meta ? JSON.stringify(result.meta) : null,
   );
   return c.json({
     explanation: {
@@ -558,6 +566,7 @@ api.post("/sources/:sourceId/options/:id/explain", async (c) => {
       llm_id: llmId,
       llm_name: llmNameFor(llmId),
       fetched_at: Date.now(),
+      meta: result.meta ?? null,
     },
   });
 });

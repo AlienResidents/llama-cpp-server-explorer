@@ -193,7 +193,7 @@ afterEach(() => {
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
-describe("fresh install (v0 → v4)", () => {
+describe("fresh install (v0 → v5)", () => {
   it("creates the llms table and seeds 3 default LLMs", async () => {
     const { llms } = await freshInstall();
     const all = llms.listLlms();
@@ -232,14 +232,14 @@ describe("fresh install (v0 → v4)", () => {
     }
   });
 
-  it("sets the schema version to 4", async () => {
+  it("sets the schema version to 5", async () => {
     const { db } = await freshInstall();
     const version = db.pragma("user_version", { simple: true }) as number;
-    expect(version).toBe(4);
+    expect(version).toBe(5);
   });
 });
 
-describe("v2 → v4 migration", () => {
+describe("v2 → v5 migration", () => {
   it("moves bedrock_model_id + bedrock_region into the bedrock-default LLM", async () => {
     const { llms, db } = await migrateFromV2({
       bedrockModelId: "anthropic.claude-3-opus-20240229-v1:0",
@@ -341,12 +341,12 @@ describe("v2 → v4 migration", () => {
     ]);
   });
 
-  it("sets the schema version to 4", async () => {
+  it("sets the schema version to 5", async () => {
     const { db } = await migrateFromV2({
       bedrockModelId: "anthropic.claude-3-opus-20240229-v1:0",
     });
     const version = db.pragma("user_version", { simple: true }) as number;
-    expect(version).toBe(4);
+    expect(version).toBe(5);
   });
 });
 
@@ -374,9 +374,9 @@ describe("idempotency", () => {
     expect(llmsAfter.n).toBe(llmsBefore.n);
     expect(settingsAfter.n).toBe(settingsBefore.n);
 
-    // Schema version is 4.
+    // Schema version is 5.
     const version = db2.pragma("user_version", { simple: true }) as number;
-    expect(version).toBe(4);
+    expect(version).toBe(5);
 
     // The explanation is still there.
     const row = db2
@@ -473,5 +473,102 @@ describe("v3 → v4 migration", () => {
     const together = llmsMod2.getLlm("openai-together");
     const cfg = together!.config as { max_tokens: number };
     expect(cfg.max_tokens).toBe(2048);
+  });
+});
+
+
+// ─── v4 → v5 migration ─────────────────────────────────────────────────────
+//
+// v4→v5 adds explanation_meta_json to option_details for structured per-flag
+// metadata (hardware impact chips + static synergy notes). Additive — existing
+// explanation rows get NULL meta, the UI renders them as today (markdown only).
+// These tests simulate a pre-v5 DB by dropping the column from a v5 install,
+// setting user_version back to 4, then re-importing db.ts to run the migration.
+
+describe("v4 → v5 migration", () => {
+  // Helper: starts from a v2→v5 migration (has the column + an explanation),
+  // drops explanation_meta_json to simulate a v4 DB, sets user_version = 4,
+  // then re-imports db.ts + llms.ts to run the v4→v5 migration.
+  async function migrateFromV4(): Promise<{
+    db: Database.Database;
+    dbPath: string;
+  }> {
+    const { db, dbPath } = await migrateFromV2({
+      bedrockModelId: "anthropic.claude-3-opus-20240229-v1:0",
+      hasExplanation: true,
+    });
+
+    // Drop the column to simulate a pre-v5 DB. SQLite 3.35+ supports this.
+    db.exec("ALTER TABLE option_details DROP COLUMN explanation_meta_json");
+    db.pragma("user_version = 4");
+    db.close();
+
+    // Re-import to run the migration.
+    process.env.DB_PATH = dbPath;
+    vi.resetModules();
+    const dbMod = await import("../db.js");
+    await import("../llms.js");
+    return { db: dbMod.db, dbPath };
+  }
+
+  it("adds the explanation_meta_json column to option_details", async () => {
+    const { db } = await migrateFromV4();
+    const cols = db.pragma("table_info(option_details)") as Array<{ name: string }>;
+    const hasCol = cols.some((c) => c.name === "explanation_meta_json");
+    expect(hasCol).toBe(true);
+  });
+
+  it("sets the schema version to 5", async () => {
+    const { db } = await migrateFromV4();
+    const version = db.pragma("user_version", { simple: true }) as number;
+    expect(version).toBe(5);
+  });
+
+  it("preserves existing explanation text (meta is NULL for old rows)", async () => {
+    const { db } = await migrateFromV4();
+    const row = db
+      .prepare(
+        "SELECT explanation, explanation_meta_json as meta FROM option_details " +
+          "WHERE source_id = ? AND option_id = ?",
+      )
+      .get("server", "threads") as { explanation: string | null; meta: string | null };
+    // The pre-existing explanation text is preserved.
+    expect(row?.explanation).toBe("This is a pre-existing explanation.");
+    // The new meta column is NULL for this row (it predates structured output).
+    expect(row?.meta).toBeNull();
+  });
+
+  it("is idempotent — re-importing on a v5 DB is a no-op", async () => {
+    const { db, dbPath } = await migrateFromV4();
+    db.close();
+
+    // Re-import a second time.
+    vi.resetModules();
+    const dbMod2 = await import("../db.js");
+    await import("../llms.js");
+    const db2 = dbMod2.db;
+
+    // Schema version is still 5.
+    const version = db2.pragma("user_version", { simple: true }) as number;
+    expect(version).toBe(5);
+
+    // Column still exists.
+    const cols = db2.pragma("table_info(option_details)") as Array<{ name: string }>;
+    expect(cols.some((c) => c.name === "explanation_meta_json")).toBe(true);
+
+    // Explanation text still preserved.
+    const row = db2
+      .prepare("SELECT explanation FROM option_details WHERE source_id = ? AND option_id = ?")
+      .get("server", "threads") as { explanation: string | null };
+    expect(row?.explanation).toBe("This is a pre-existing explanation.");
+    void dbPath;
+  });
+});
+
+describe("fresh install has explanation_meta_json", () => {
+  it("creates option_details with the explanation_meta_json column", async () => {
+    const { db } = await freshInstall();
+    const cols = db.pragma("table_info(option_details)") as Array<{ name: string }>;
+    expect(cols.some((c) => c.name === "explanation_meta_json")).toBe(true);
   });
 });

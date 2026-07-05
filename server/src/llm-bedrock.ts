@@ -8,7 +8,7 @@
 
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import type { BedrockConfig, ExplainInput, ExplainResult, Llm, LlmProvider } from "./llm-types.js";
-import { buildPrompt } from "./llm-prompt.js";
+import { buildPrompt, parseExplainResponse } from "./llm-prompt.js";
 
 export const bedrockProvider: LlmProvider = {
   isConfigured(llm) {
@@ -56,7 +56,9 @@ export const bedrockProvider: LlmProvider = {
           "No AWS credentials in the environment. Set AWS_PROFILE / AWS_ACCESS_KEY_ID / AWS_ROLE_ARN before starting the server.",
       };
     }
-    return callBedrock(llm, buildPrompt(input), cfg.max_tokens || 2048, timeoutMs);
+    const raw = await callBedrock(llm, buildPrompt(input), cfg.max_tokens || 2048, timeoutMs);
+    if (!raw.ok) return raw;
+    return parseExplainResponse(raw);
   },
 
   async testConnection(llm, timeoutMs: number): Promise<ExplainResult> {

@@ -98,7 +98,11 @@ export type ExplainInput = {
 
 export type ExplainOk = {
   ok: true;
-  // The text returned by the model.
+  // The markdown body returned by the model (the 3-section explanation:
+  // What it does / When you'd change it / Gotchas). When the LLM returns
+  // structured JSON, this is the `explanation` field extracted from it;
+  // when parsing fails or the LLM returned plain prose, this is the raw
+  // response text.
   text: string;
   // A model identifier string for provenance, stored in
   // option_details.explanation_model. For Bedrock: the ARN or model id.
@@ -106,6 +110,43 @@ export type ExplainOk = {
   // differ from the requested model on some providers). For Ollama: the
   // model name.
   model: string;
+  // Structured metadata extracted from the LLM response (hardware impact
+  // chips + static synergy notes). Present only when the LLM returned
+  // parseable JSON with these fields; absent for plain-prose responses
+  // (older explanations, parse failures, or `testConnection` calls).
+  meta?: ExplainMeta;
+};
+
+// Structured per-flag metadata extracted from the LLM's explanation response.
+// Rendered as chips + callouts in the UI alongside the markdown body. Both
+// fields optional — the LLM may omit them when they don't apply (e.g. a flag
+// with no meaningful hardware impact gets an empty/absent array).
+export type ExplainMeta = {
+  // Hardware resources the flag stresses, with the direction of effect.
+  // Normalized to canonical enum values by parseExplainResponse — see
+  // HARDWARE_TYPE_SYNONYMS / HARDWARE_EFFECT_SYNONYMS in llm-prompt.ts.
+  hardware_impact?: HardwareImpact[];
+  // Static cross-flag notes shown in the flag's card. These mention OTHER
+  // flags the user should consider alongside this one ("pairs with",
+  // "watch out for"). Stateless — no selection-state required.
+  synergy_notes?: SynergyNote[];
+};
+
+export type HardwareImpact = {
+  // Canonical resource: VRAM | RAM | COMPUTE | CPU | DISK | NETWORK.
+  type: string;
+  // Canonical effect: REDUCTION | INCREASE | EXPANSION | ALTERATION.
+  effect: string;
+};
+
+export type SynergyNote = {
+  // "info" renders as a blue 💡 note (architectural advice, pairs-with);
+  // "warning" renders as an amber ⚠️ note (footgun, common mistake).
+  severity: "info" | "warning";
+  // Short label, e.g. "Pairs with --ngl", "Memory math with --parallel".
+  title: string;
+  // One or two sentences of substance. No hedging.
+  detail: string;
 };
 
 // Provider-agnostic failure reasons. Each provider maps its internal errors

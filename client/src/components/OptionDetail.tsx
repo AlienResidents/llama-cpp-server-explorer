@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { LlmAvailability, OptionDetail } from "../types";
+import type { HardwareImpact, LlmAvailability, OptionDetail, SynergyNote } from "../types";
 import { api } from "../api";
 import { formatAge } from "./Toast";
 
@@ -47,6 +47,7 @@ export function OptionDetailView({
           llm_id: res.explanation.llm_id,
           llm_name: res.explanation.llm_name,
           fetched_at: res.explanation.fetched_at,
+          meta: res.explanation.meta,
         },
       });
     } catch (err) {
@@ -104,7 +105,21 @@ export function OptionDetailView({
               {explanation.fetched_at ? ` · ${formatAge(Date.now() - explanation.fetched_at)}` : ""}
             </span>
           </h3>
+          {explanation.meta?.hardware_impact && explanation.meta.hardware_impact.length > 0 && (
+            <div className="hw-impact-chips">
+              {explanation.meta.hardware_impact.map((h, i) => (
+                <HardwareImpactChip key={i} impact={h} />
+              ))}
+            </div>
+          )}
           <div className="explanation">{explanation.text}</div>
+          {explanation.meta?.synergy_notes && explanation.meta.synergy_notes.length > 0 && (
+            <div className="synergy-notes">
+              {explanation.meta.synergy_notes.map((n, i) => (
+                <SynergyNoteCard key={i} note={n} />
+              ))}
+            </div>
+          )}
         </section>
       )}
 
@@ -144,6 +159,62 @@ export function OptionDetailView({
           </p>
         </section>
       )}
+    </div>
+  );
+}
+
+// ─── Hardware impact chip ───────────────────────────────────────────────────
+// Renders a single {type, effect} pair as a colored chip. Color encodes the
+// effect direction (green=reduce, red=increase, amber=expand, blue=alter);
+// icon reinforces it. Gives at-a-glance scannability in the detail view.
+
+const EFFECT_ICON: Record<string, string> = {
+  REDUCTION: "📉",
+  INCREASE: "📈",
+  EXPANSION: "📊",
+  ALTERATION: "🔄",
+};
+
+const EFFECT_COLOR: Record<string, string> = {
+  REDUCTION: "var(--good)",
+  INCREASE: "var(--danger)",
+  EXPANSION: "var(--warn)",
+  ALTERATION: "var(--accent)",
+};
+
+function HardwareImpactChip({ impact }: { impact: HardwareImpact }) {
+  const icon = EFFECT_ICON[impact.effect] ?? "•";
+  const color = EFFECT_COLOR[impact.effect] ?? "var(--fg-muted)";
+  return (
+    <span
+      className="hw-impact-chip"
+      style={{ color, borderColor: color }}
+      title={`${impact.type} · ${impact.effect}`}
+    >
+      {icon} {impact.type} · {impact.effect}
+    </span>
+  );
+}
+
+// ─── Synergy note callout ───────────────────────────────────────────────────
+// Renders a single {severity, title, detail} note as a callout box. Info notes
+// get a blue 💡 tint (architectural advice); warning notes get an amber ⚠️ tint
+// (footguns, common mistakes). Shown below the markdown body.
+
+function SynergyNoteCard({ note }: { note: SynergyNote }) {
+  const isWarning = note.severity === "warning";
+  const icon = isWarning ? "⚠️" : "💡";
+  const color = isWarning ? "var(--warn)" : "var(--accent)";
+  return (
+    <div
+      className="synergy-note"
+      style={{ borderColor: color }}
+    >
+      <span className="synergy-note-icon">{icon}</span>
+      <div className="synergy-note-body">
+        <div className="synergy-note-title" style={{ color }}>{note.title}</div>
+        <div className="synergy-note-detail">{note.detail}</div>
+      </div>
     </div>
   );
 }
