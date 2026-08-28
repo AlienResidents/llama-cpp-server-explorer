@@ -2,6 +2,9 @@
 # Node/pnpm doesn't match the engines field. (.npmrc engine-strict=true only
 # enforces *dependencies*' engine constraints, not the project's own.)
 engineStrict: true
+overrides:
+  postcss: ">=8.5.23"
+  shell-quote: ">=1.9.0"
 allowBuilds:
   better-sqlite3: true
   esbuild: true
