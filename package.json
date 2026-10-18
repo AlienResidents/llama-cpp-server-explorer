@@ -19,7 +19,7 @@
     "@hono/node-server": "2.0.10",
     "@octokit/request": "10.0.10",
     "better-sqlite3": "12.10.0",
-    "hono": "4.13.5",
+    "hono": "4.13.13",
     "marked": "18.0.5"
   },
   "devDependencies": {
